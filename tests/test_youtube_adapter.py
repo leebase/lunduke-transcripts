@@ -39,3 +39,20 @@ def test_ytdlp_timeout_exhaustion_raises_runtime_error(monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="yt_dlp_timeout"):
         adapter._run(["--version"], retry=True)
+
+
+def test_list_videos_handles_direct_watch_url_payload(monkeypatch) -> None:
+    payload = {
+        "id": "i6idieq9bso",
+        "title": "My Favorite Scripture: On My Worst Day",
+        "channel": "NCOC Live",
+        "channel_id": "channel123",
+        "timestamp": 1700000000,
+        "duration": 1200,
+    }
+    adapter = YtDlpAdapter(binary="yt-dlp")
+    monkeypatch.setattr(adapter, "_run_json", lambda args: payload)
+    videos = adapter.list_videos("https://www.youtube.com/watch?v=i6idieq9bso")
+    assert len(videos) == 1
+    assert videos[0].video_id == "i6idieq9bso"
+    assert videos[0].title.startswith("My Favorite Scripture")

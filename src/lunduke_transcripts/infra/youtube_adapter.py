@@ -78,6 +78,39 @@ class YtDlpAdapter:
         result = self._run(args)
         return json.loads(result.stdout)
 
+    def _video_record_from_entry(
+        self,
+        entry: dict,
+        *,
+        channel_url: str,
+        default_channel_name: str,
+        default_channel_id: str | None,
+    ) -> VideoRecord | None:
+        video_id = entry.get("id")
+        if not video_id:
+            return None
+        return VideoRecord(
+            video_id=str(video_id),
+            video_url=f"https://www.youtube.com/watch?v={video_id}",
+            channel_id=(
+                str(entry.get("channel_id") or default_channel_id)
+                if (entry.get("channel_id") or default_channel_id)
+                else None
+            ),
+            channel_name=str(entry.get("channel") or default_channel_name),
+            channel_url=channel_url,
+            title=str(entry.get("title") or video_id),
+            description=(
+                str(entry.get("description"))
+                if entry.get("description") is not None
+                else None
+            ),
+            published_at=_parse_publish_time(entry),
+            duration_seconds=(
+                int(entry["duration"]) if entry.get("duration") is not None else None
+            ),
+        )
+
     def list_videos(
         self, channel_url: str, max_items: int | None = None
     ) -> list[VideoRecord]:
@@ -94,29 +127,30 @@ class YtDlpAdapter:
         entries = payload.get("entries", [])
         videos: list[VideoRecord] = []
 
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            video_id = entry.get("id")
-            if not video_id:
-                continue
-            videos.append(
-                VideoRecord(
-                    video_id=str(video_id),
-                    video_url=f"https://www.youtube.com/watch?v={video_id}",
-                    channel_id=str(channel_id) if channel_id else None,
-                    channel_name=str(entry.get("channel") or channel_name),
+        if isinstance(entries, list) and entries:
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                video = self._video_record_from_entry(
+                    entry,
                     channel_url=channel_url,
-                    title=str(entry.get("title") or video_id),
-                    description=None,
-                    published_at=_parse_publish_time(entry),
-                    duration_seconds=(
-                        int(entry["duration"])
-                        if entry.get("duration") is not None
-                        else None
-                    ),
+                    default_channel_name=str(channel_name),
+                    default_channel_id=str(channel_id) if channel_id else None,
                 )
+                if video is not None:
+                    videos.append(video)
+            return videos
+
+        # Direct video URLs often return a single video payload with no "entries".
+        if isinstance(payload, dict):
+            video = self._video_record_from_entry(
+                payload,
+                channel_url=channel_url,
+                default_channel_name=str(channel_name),
+                default_channel_id=str(channel_id) if channel_id else None,
             )
+            if video is not None:
+                videos.append(video)
         return videos
 
     def fetch_video_metadata(

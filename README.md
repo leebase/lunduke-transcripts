@@ -31,7 +31,11 @@ pip install -e ".[dev]"
 ```bash
 lunduke-transcripts run --config config/channels.toml
 lunduke-transcripts run --config config/channels.toml --article
+lunduke-transcripts run --url "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
+
+You can pass one or more `--url` values (video/channel/playlist).  
+When `--url` is provided, the run works even if `--config` does not exist.
 
 ### Date range options
 
@@ -41,6 +45,7 @@ lunduke-transcripts run --config config/channels.toml --from 2026-02-01
 lunduke-transcripts run --config config/channels.toml --to 2026-02-29
 lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 2026-02-29 --reprocess
 lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 2026-02-29 --article
+lunduke-transcripts run --url "https://www.youtube.com/watch?v=VIDEO_ID" --from 2026-02-01 --to 2026-02-29
 ```
 
 ### Environment file override

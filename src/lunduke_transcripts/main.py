@@ -6,11 +6,18 @@ import argparse
 import json
 from datetime import UTC, datetime, time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 from lunduke_transcripts import __version__
 from lunduke_transcripts.app.orchestrator import Orchestrator
-from lunduke_transcripts.config import load_config, load_env_file
+from lunduke_transcripts.config import (
+    ChannelConfig,
+    Config,
+    default_config_from_env,
+    load_config,
+    load_env_file,
+)
 from lunduke_transcripts.domain.models import RunOptions
 from lunduke_transcripts.infra.llm_adapter import LLMAdapter
 from lunduke_transcripts.infra.storage import Storage
@@ -48,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to TOML config (default: config/channels.toml)",
     )
     run_parser.add_argument(
+        "--url",
+        action="append",
+        default=[],
+        help="Direct YouTube target URL (video/channel/playlist). Can be repeated.",
+    )
+    run_parser.add_argument(
         "--from", dest="from_date", help="Published date start (YYYY-MM-DD)"
     )
     run_parser.add_argument(
@@ -71,11 +84,51 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _derive_channel_name(url: str, idx: int) -> str:
+    parsed = urlparse(url)
+    if parsed.path == "/watch":
+        video_id = parse_qs(parsed.query).get("v", [None])[0]
+        if video_id:
+            return f"video-{video_id}"
+    if parsed.path:
+        tail = parsed.path.rstrip("/").split("/")[-1]
+        if tail:
+            return tail
+    return f"url-target-{idx}"
+
+
+def _with_url_channels(config: Config, urls: list[str]) -> Config:
+    channels = [
+        ChannelConfig(
+            name=_derive_channel_name(url, idx),
+            url=url,
+            language=config.app.default_language,
+        )
+        for idx, url in enumerate(urls, start=1)
+    ]
+    return Config(app=config.app, llm=config.llm, channels=channels)
+
+
 def run_command(args: argparse.Namespace) -> int:
     """Execute the run pipeline command."""
 
     load_env_file(args.env_file)
-    config = load_config(args.config)
+    config_path = Path(args.config)
+    if config_path.exists():
+        config = load_config(config_path)
+    elif args.url:
+        config = default_config_from_env()
+    else:
+        raise SystemExit(
+            f"Config file not found: {config_path}. Provide --config or pass --url."
+        )
+    if args.url:
+        config = _with_url_channels(config, args.url)
+    if not config.channels:
+        raise SystemExit(
+            "No channels configured. "
+            "Add channels in config or pass one or more --url values."
+        )
     from_utc = (
         _parse_date(args.from_date, config.app.timezone, end_of_day=False)
         if args.from_date

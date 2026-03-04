@@ -90,19 +90,11 @@ def load_env_file(path: str | Path = ".env") -> None:
             os.environ[key] = value
 
 
-def load_config(path: str | Path) -> Config:
-    """Load TOML config from disk with safe defaults."""
-
-    config_path = Path(path)
-    with config_path.open("rb") as fh:
-        raw = tomllib.load(fh)
-
-    app_raw = _as_dict(raw.get("app"))
-    llm_raw = _as_dict(raw.get("llm"))
-    channels_raw = raw.get("channels", [])
-    if not isinstance(channels_raw, list):
-        raise ValueError("`channels` must be an array of tables in TOML config")
-
+def _build_config(
+    app_raw: dict[str, Any],
+    llm_raw: dict[str, Any],
+    channels_raw: list[dict[str, Any]],
+) -> Config:
     app = AppConfig(
         data_dir=Path(app_raw.get("data_dir", "data")),
         default_language=str(app_raw.get("default_language", "en")),
@@ -164,5 +156,25 @@ def load_config(path: str | Path) -> Config:
                 language=str(item["language"]) if item.get("language") else None,
             )
         )
-
     return Config(app=app, llm=llm, channels=channels)
+
+
+def default_config_from_env() -> Config:
+    """Build configuration defaults using environment overrides."""
+
+    return _build_config(app_raw={}, llm_raw={}, channels_raw=[])
+
+
+def load_config(path: str | Path) -> Config:
+    """Load TOML config from disk with safe defaults."""
+
+    config_path = Path(path)
+    with config_path.open("rb") as fh:
+        raw = tomllib.load(fh)
+
+    app_raw = _as_dict(raw.get("app"))
+    llm_raw = _as_dict(raw.get("llm"))
+    channels_raw = raw.get("channels", [])
+    if not isinstance(channels_raw, list):
+        raise ValueError("`channels` must be an array of tables in TOML config")
+    return _build_config(app_raw=app_raw, llm_raw=llm_raw, channels_raw=channels_raw)
