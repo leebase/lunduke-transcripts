@@ -127,7 +127,7 @@ Hardening and next-iteration planning after MVP completion.
 - [x] Tests pass clean (run profile-specific tests)
 - [x] Tested As Lee: ran app as a user, fixed issues found
 - [x] Updated: context.md, WHERE_AM_I.md, result-review.md, sprint-plan.md
-- [ ] Committed and pushed with descriptive message
+- [x] Committed and pushed with descriptive message
 
 Commits completed: `ee63626`, `3379e3d`  
 Push completed successfully to `origin/main`
