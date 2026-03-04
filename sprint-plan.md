@@ -13,7 +13,42 @@
 
 Assumptions:
 - Sprint length: 1 week (adjustable)
-- Priority: ship a reliable exact-transcript pipeline first, then cleanup, then scheduling hardening
+- Priority: harden compatibility, reliability, and reproducibility for production use
+
+---
+
+## Sprint 4 — Reliability Hardening (Current)
+
+**Status**: ✅ Completed (2026-03-04)  
+**Goal**: Close high-priority review gaps: Python version contract, timeout safety, docs portability, and one-command reproducible checks.
+
+### Scope
+
+- [x] Resolve Python compatibility contract:
+  - Option A: bump runtime support to `>=3.11`
+  - Option B: refactor `datetime.UTC` usage to `timezone.utc` for 3.10 support
+- [x] Add `yt-dlp` subprocess timeout and timeout-aware retry/error reporting
+- [x] Add LLM request timeout and bounded retries with clear failure reason tags
+- [x] Convert absolute local markdown links to relative project links
+- [x] Make tests reproducible from a clean clone:
+  - add pytest config/path behavior in `pyproject.toml` or
+  - codify editable install requirement and enforce in CI
+- [x] Add CI workflow gates for:
+  - `ruff check src tests`
+  - `black --check src tests`
+  - `pytest -q`
+- [x] Add targeted tests for:
+  - yt-dlp timeout path
+  - LLM timeout/retry path
+  - Python version contract expectations
+
+### Acceptance Criteria
+
+1. No runtime contract mismatch remains between `requires-python` and code usage.
+2. External calls (yt-dlp + LLM) fail fast with bounded retries and explicit run-item error messages.
+3. `README.md` and design docs are portable (no machine-specific absolute file links).
+4. A fresh environment can run the documented verification commands successfully.
+5. CI enforces lint/format/test checks on every push/PR.
 
 ---
 

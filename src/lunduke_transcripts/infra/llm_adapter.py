@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 
 from lunduke_transcripts.transforms.article_writer import (
     ARTICLE_SYSTEM_PROMPT,
@@ -21,10 +22,22 @@ from lunduke_transcripts.transforms.transcript_cleaner import (
 class LLMAdapter:
     """LLM adapter with OpenAI and OpenRouter support."""
 
-    def __init__(self, provider: str, model: str, prompt_version: str) -> None:
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        prompt_version: str,
+        *,
+        timeout_seconds: int = 60,
+        retries: int = 2,
+        retry_backoff_seconds: int = 2,
+    ) -> None:
         self.provider = provider.strip().lower()
         self.model = model
         self.prompt_version = prompt_version
+        self.timeout_seconds = timeout_seconds
+        self.retries = retries
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     def _api_key(self) -> str:
         if self.provider == "openai":
@@ -80,18 +93,39 @@ class LLMAdapter:
         if headers:
             kwargs["extra_headers"] = headers
 
-        response = client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            **kwargs,
-        )
-        output_text = getattr(response, "output_text", "") or ""
-        if not output_text:
-            raise RuntimeError("LLM response contained no text")
-        return output_text.strip() + "\n"
+        attempts = self.retries + 1
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                response = client.responses.create(
+                    model=self.model,
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    timeout=self.timeout_seconds,
+                    **kwargs,
+                )
+                output_text = getattr(response, "output_text", "") or ""
+                if not output_text:
+                    raise RuntimeError("llm_empty_response")
+                return output_text.strip() + "\n"
+            except (APITimeoutError, TimeoutError) as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                time.sleep(self.retry_backoff_seconds * attempt)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                time.sleep(self.retry_backoff_seconds * attempt)
+
+        if isinstance(last_error, (APITimeoutError, TimeoutError)):
+            raise RuntimeError(
+                f"llm_timeout: request exceeded {self.timeout_seconds}s"
+            ) from last_error
+        raise RuntimeError(f"llm_request_failed: {last_error}") from last_error
 
     def clean_transcript(self, exact_transcript: str) -> tuple[str, str, str]:
         """Return cleaned transcript text and provenance."""

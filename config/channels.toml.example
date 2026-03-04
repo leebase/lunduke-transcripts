@@ -5,6 +5,7 @@ timezone = "America/Chicago"
 enable_cleanup = true
 enable_article = false
 yt_dlp_binary = "yt-dlp"
+yt_dlp_timeout_seconds = 120
 fetch_retries = 2
 retry_backoff_seconds = 2
 max_videos_per_channel = 40
@@ -13,6 +14,9 @@ max_videos_per_channel = 40
 provider = "openrouter"
 model = "openai/gpt-4.1-mini"
 prompt_version = "v1"
+timeout_seconds = 60
+retries = 2
+retry_backoff_seconds = 2
 
 [[channels]]
 name = "Example Journalist"

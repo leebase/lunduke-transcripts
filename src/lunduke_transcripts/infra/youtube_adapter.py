@@ -33,6 +33,7 @@ class YtDlpAdapter:
     """Adapter around yt-dlp subprocess calls."""
 
     binary: str = "yt-dlp"
+    timeout_seconds: int = 120
     retries: int = 2
     backoff_seconds: int = 2
 
@@ -45,6 +46,7 @@ class YtDlpAdapter:
     ) -> subprocess.CompletedProcess[str]:
         attempts = self.retries + 1 if retry else 1
         last_error: subprocess.CalledProcessError | None = None
+        last_timeout: subprocess.TimeoutExpired | None = None
         for attempt in range(1, attempts + 1):
             try:
                 return subprocess.run(
@@ -52,12 +54,22 @@ class YtDlpAdapter:
                     check=not allow_failure,
                     text=True,
                     capture_output=True,
+                    timeout=self.timeout_seconds,
                 )
+            except subprocess.TimeoutExpired as exc:
+                last_timeout = exc
+                if attempt >= attempts:
+                    break
+                time.sleep(self.backoff_seconds * attempt)
             except subprocess.CalledProcessError as exc:
                 last_error = exc
                 if attempt >= attempts:
                     raise
                 time.sleep(self.backoff_seconds * attempt)
+        if last_timeout is not None:
+            raise RuntimeError(
+                f"yt_dlp_timeout: command exceeded {self.timeout_seconds}s"
+            ) from last_timeout
         if last_error is not None:
             raise last_error
         raise RuntimeError("Unexpected yt-dlp execution path")

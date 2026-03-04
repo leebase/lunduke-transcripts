@@ -6,7 +6,7 @@
 
 ## 1. Goals and Scope
 
-This design implements the requirements in [product-definition.md](/Users/leeharrington/projects/lunduke-transcripts/product-definition.md):
+This design implements the requirements in [product-definition.md](product-definition.md):
 
 - Run on demand or on a schedule.
 - Detect newly published videos and avoid duplicate processing.

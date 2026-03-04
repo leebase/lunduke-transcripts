@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - py310 fallback
-    import tomli as tomllib
 
 
 @dataclass(frozen=True)
@@ -23,6 +19,7 @@ class AppConfig:
     enable_cleanup: bool = True
     enable_article: bool = False
     yt_dlp_binary: str = "yt-dlp"
+    yt_dlp_timeout_seconds: int = 120
     fetch_retries: int = 2
     retry_backoff_seconds: int = 2
     max_videos_per_channel: int | None = None
@@ -35,6 +32,9 @@ class LLMConfig:
     provider: str = "openai"
     model: str = "gpt-4.1-mini"
     prompt_version: str = "v1"
+    timeout_seconds: int = 60
+    retries: int = 2
+    retry_backoff_seconds: int = 2
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,12 @@ def load_config(path: str | Path) -> Config:
             _parse_bool(app_raw.get("enable_article"), False),
         ),
         yt_dlp_binary=str(app_raw.get("yt_dlp_binary", "yt-dlp")),
+        yt_dlp_timeout_seconds=int(
+            app_raw.get(
+                "yt_dlp_timeout_seconds",
+                os.getenv("YT_DLP_TIMEOUT_SECONDS", 120),
+            )
+        ),
         fetch_retries=int(app_raw.get("fetch_retries", 2)),
         retry_backoff_seconds=int(app_raw.get("retry_backoff_seconds", 2)),
         max_videos_per_channel=(
@@ -130,6 +136,16 @@ def load_config(path: str | Path) -> Config:
         model=str(os.getenv("LLM_MODEL", llm_raw.get("model", "gpt-4.1-mini"))),
         prompt_version=str(
             os.getenv("LLM_PROMPT_VERSION", llm_raw.get("prompt_version", "v1"))
+        ),
+        timeout_seconds=int(
+            os.getenv("LLM_TIMEOUT_SECONDS", llm_raw.get("timeout_seconds", 60))
+        ),
+        retries=int(os.getenv("LLM_RETRIES", llm_raw.get("retries", 2))),
+        retry_backoff_seconds=int(
+            os.getenv(
+                "LLM_RETRY_BACKOFF_SECONDS",
+                llm_raw.get("retry_backoff_seconds", 2),
+            )
         ),
     )
 

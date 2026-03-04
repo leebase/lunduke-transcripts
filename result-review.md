@@ -6,6 +6,39 @@
 
 ---
 
+## 2026-03-04 — Sprint 4 Reliability Hardening Completed
+
+Completed a focused hardening sprint based on external review findings.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Python contract | Runtime support aligned to Python 3.11+ in `pyproject.toml` |
+| yt-dlp safety | Added subprocess timeout + retry handling with explicit timeout error tags |
+| LLM safety | Added request timeout + bounded retries + structured timeout/failure messages |
+| Test reproducibility | Added pytest path config (`pythonpath = ["src"]`) |
+| CI gates | Added GitHub Actions workflow for ruff, black --check, and pytest |
+| Docs portability | Replaced absolute local file links with relative links in project docs |
+| Regression coverage | Added tests for yt-dlp timeout behavior, LLM retry/timeout behavior, and project contract |
+
+### Why It Matters
+
+- Reduces scheduler stall risk from hanging external calls.
+- Makes runtime support expectations explicit and enforceable.
+- Improves contributor and CI reproducibility.
+- Strengthens maintainability by preventing portability/documentation regressions.
+
+### How to Verify
+
+1. `source .venv/bin/activate`
+2. `ruff check src tests`
+3. `black --check src tests`
+4. `pytest -q`
+5. Inspect CI workflow at `.github/workflows/ci.yml`
+
+---
+
 ## 2026-03-04 — MVP Pipeline Delivered (Sprints 1-3)
 
 Implemented and validated the full transcript workflow from product/design docs.

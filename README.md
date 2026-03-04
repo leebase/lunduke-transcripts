@@ -8,6 +8,8 @@ Local-first Python pipeline that discovers new YouTube videos, captures transcri
 
 ## Install
 
+Requires Python 3.11+.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -16,7 +18,7 @@ pip install -e ".[dev]"
 
 ## Configure
 
-1. Start with [config/channels.toml.example](/Users/leeharrington/projects/lunduke-transcripts/config/channels.toml.example)
+1. Start with [config/channels.toml.example](config/channels.toml.example)
 2. Copy to `config/channels.toml`
 3. Add one or more channels
 4. Copy `.env.example` to `.env` and set provider/model/API key:
@@ -70,12 +72,12 @@ Use the same run command via scheduler.
 ### Cron (hourly example)
 
 ```bash
-15 * * * * cd /Users/REPLACE_ME/projects/lunduke-transcripts && /Users/REPLACE_ME/projects/lunduke-transcripts/scripts/run_pipeline.sh
+15 * * * * cd /path/to/lunduke-transcripts && /path/to/lunduke-transcripts/scripts/run_pipeline.sh
 ```
 
 ### launchd (macOS)
 
-Use [scripts/com.lunduke.transcripts.plist.example](/Users/leeharrington/projects/lunduke-transcripts/scripts/com.lunduke.transcripts.plist.example), replace `REPLACE_ME`, then:
+Use [scripts/com.lunduke.transcripts.plist.example](scripts/com.lunduke.transcripts.plist.example), replace `REPLACE_ME`, then:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.lunduke.transcripts.plist
@@ -99,8 +101,13 @@ black src tests
 ## Troubleshooting
 
 - `yt-dlp not found`: set `[app].yt_dlp_binary` in config or install in active environment.
+- `yt-dlp` hangs/slow responses:
+  - tune `[app].yt_dlp_timeout_seconds`
+  - tune `[app].fetch_retries` and `[app].retry_backoff_seconds`
 - No transcript files produced: video may not expose captions; check run report status.
 - Cleanup/article skipped: set `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`) and provider/model.
+- LLM timeout/retry behavior:
+  - set `LLM_TIMEOUT_SECONDS`, `LLM_RETRIES`, `LLM_RETRY_BACKOFF_SECONDS` in `.env`
 - Duplicate processing unexpectedly:
   - default mode skips already processed videos
   - use `--reprocess` only when intentional

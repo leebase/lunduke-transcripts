@@ -92,6 +92,7 @@ def run_command(args: argparse.Namespace) -> int:
     storage = Storage(config.app.data_dir)
     youtube = YtDlpAdapter(
         binary=config.app.yt_dlp_binary,
+        timeout_seconds=config.app.yt_dlp_timeout_seconds,
         retries=config.app.fetch_retries,
         backoff_seconds=config.app.retry_backoff_seconds,
     )
@@ -99,6 +100,9 @@ def run_command(args: argparse.Namespace) -> int:
         provider=config.llm.provider,
         model=config.llm.model,
         prompt_version=config.llm.prompt_version,
+        timeout_seconds=config.llm.timeout_seconds,
+        retries=config.llm.retries,
+        retry_backoff_seconds=config.llm.retry_backoff_seconds,
     )
     orchestrator = Orchestrator(
         config=config, storage=storage, youtube=youtube, llm=llm

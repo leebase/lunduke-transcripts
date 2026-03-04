@@ -8,13 +8,14 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Phase** | MVP Implemented |
+| **Phase** | Reliability Hardened |
 | **Mode** | 2 (Implementation with approval) |
 | **Last Updated** | 2026-03-04 |
 
 ### Sprint Status
 | Sprint | Status | Completion |
 |--------|--------|------------|
+| Sprint 4 — Reliability Hardening | ✅ Completed | 100% |
 | Sprint 1 — Foundation | ✅ Completed | 100% |
 | Sprint 2 — LLM Cleanup | ✅ Completed | 100% |
 | Sprint 3 — Scheduling and Hardening | ✅ Completed | 100% |
@@ -37,9 +38,13 @@ Hardening and next-iteration planning after MVP completion.
 - ✅ Added scheduler assets (`scripts/run_pipeline.sh`, launchd example)
 - ✅ Added tests for VTT parsing and date-range/idempotency behavior
 - ✅ Test As Lee completed via live CLI runs against a real channel
+- ✅ Added article generation with paragraph-end timestamp normalization
+- ✅ Added OpenRouter-focused `.env` configuration flow
+- ✅ Fixed undated artifact folder migration to dated names when publish time exists
+- ✅ Completed Sprint 4 hardening: Python contract, timeouts/retries, portable docs links, CI workflow
 
 ### In Progress
-- ⏳ Post-MVP polish and optional enhancements
+- ⏳ Operational tuning and optional feature expansion
 
 ---
 
@@ -87,9 +92,9 @@ Hardening and next-iteration planning after MVP completion.
 
 | Rank | Action | Owner | Done When |
 |------|--------|-------|----------|
-| 1 | Add integration test with mocked yt-dlp subprocess output | AI | Deterministic adapter behavior covered |
+| 1 | Add provider-specific fallback model policy (OpenRouter) | Human+AI | Automatic fallback behavior documented and tested |
 | 2 | Add optional backfill limit (`--max-backfill-days`) | Human+AI | Large first run safety control available |
-| 3 | Decide and document default LLM model policy | Human | Cleanup defaults locked |
+| 3 | Add dependency audit in CI (`pip-audit`) | AI | Security scan runs on pull requests |
 
 ---
 
@@ -111,7 +116,7 @@ Hardening and next-iteration planning after MVP completion.
 
 ## Environment Notes
 
-- **Working Directory**: `/Users/leeharrington/projects/lunduke-transcripts`
+- **Working Directory**: `./lunduke-transcripts`
 - **Runtime**: Python 3.13 + project `.venv`
 - **Key tools**: `yt-dlp`, `pytest`, `ruff`, `black`
 
@@ -124,5 +129,5 @@ Hardening and next-iteration planning after MVP completion.
 - [x] Updated: context.md, WHERE_AM_I.md, result-review.md, sprint-plan.md
 - [ ] Committed and pushed with descriptive message
 
-Commit completed: `f6f1720`  
-Push blocked: no git remote configured (`git push` failed with no destination)
+Commits completed: `ee63626`, `3379e3d`  
+Push completed successfully to `origin/main`
