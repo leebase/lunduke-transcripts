@@ -3,14 +3,15 @@ data_dir = "data"
 default_language = "en"
 timezone = "America/Chicago"
 enable_cleanup = false
+enable_article = false
 yt_dlp_binary = "yt-dlp"
 fetch_retries = 2
 retry_backoff_seconds = 2
 max_videos_per_channel = 40
 
 [llm]
-provider = "openai"
-model = "gpt-4.1-mini"
+provider = "openrouter"
+model = "openai/gpt-4.1-mini"
 prompt_version = "v1"
 
 # Add one or more channels:

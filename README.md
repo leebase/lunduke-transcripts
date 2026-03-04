@@ -19,12 +19,16 @@ pip install -e ".[dev]"
 1. Start with [config/channels.toml.example](/Users/leeharrington/projects/lunduke-transcripts/config/channels.toml.example)
 2. Copy to `config/channels.toml`
 3. Add one or more channels
-4. If cleanup is enabled, set `OPENAI_API_KEY`
+4. Copy `.env.example` to `.env` and set provider/model/API key:
+   - `LLM_PROVIDER=openrouter`
+   - `LLM_MODEL=openai/gpt-4.1-mini` (or your preferred OpenRouter model)
+   - `OPENROUTER_API_KEY=...`
 
 ## CLI
 
 ```bash
 lunduke-transcripts run --config config/channels.toml
+lunduke-transcripts run --config config/channels.toml --article
 ```
 
 ### Date range options
@@ -34,6 +38,13 @@ lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 202
 lunduke-transcripts run --config config/channels.toml --from 2026-02-01
 lunduke-transcripts run --config config/channels.toml --to 2026-02-29
 lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 2026-02-29 --reprocess
+lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 2026-02-29 --article
+```
+
+### Environment file override
+
+```bash
+lunduke-transcripts run --config config/channels.toml --env-file .env
 ```
 
 ## Outputs
@@ -41,12 +52,14 @@ lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 202
 ```text
 data/
   db/lunduke_transcripts.sqlite3
-  videos/<video_id>/
+  videos/<YYYY-MM-DD_slugified-title__video_id>/
     metadata.json
     transcript_exact.vtt
     transcript_exact.md
     transcript_exact.txt
     transcript_clean.md            # when cleanup succeeds/enabled
+    news_article.md               # when article generation succeeds/enabled
+    news_article_metadata.json
   runs/<run_id>.json
 ```
 
@@ -87,7 +100,7 @@ black src tests
 
 - `yt-dlp not found`: set `[app].yt_dlp_binary` in config or install in active environment.
 - No transcript files produced: video may not expose captions; check run report status.
-- Cleanup skipped/failing: set `OPENAI_API_KEY` or disable cleanup.
+- Cleanup/article skipped: set `OPENROUTER_API_KEY` (or `OPENAI_API_KEY`) and provider/model.
 - Duplicate processing unexpectedly:
   - default mode skips already processed videos
   - use `--reprocess` only when intentional

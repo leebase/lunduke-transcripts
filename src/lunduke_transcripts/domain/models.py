@@ -39,6 +39,7 @@ class RunOptions:
     from_utc: datetime | None = None
     to_utc: datetime | None = None
     reprocess: bool = False
+    generate_article: bool = False
 
 
 @dataclass

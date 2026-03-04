@@ -57,8 +57,12 @@ class Orchestrator:
         run_id, started_at = self.storage.start_run(options.from_utc, options.to_utc)
         failures: list[dict[str, str]] = []
         videos_seen = 0
+        cleanup_enabled = self.config.app.enable_cleanup
+        article_enabled = self.config.app.enable_article or options.generate_article
+        llm_enabled = bool(getattr(self.llm, "is_enabled", lambda: True)())
 
         try:
+            discovered_video_ids: set[str] = set()
             for channel in self.config.channels:
                 discovered = self.youtube.list_videos(
                     channel.url, max_items=self.config.app.max_videos_per_channel
@@ -66,6 +70,7 @@ class Orchestrator:
                 videos_seen += len(discovered)
                 for video in discovered:
                     self.storage.upsert_video(video)
+                    discovered_video_ids.add(video.video_id)
                 self.storage.log_run_item(
                     run_id,
                     video_id=None,
@@ -75,6 +80,8 @@ class Orchestrator:
                 )
 
             candidates = self.storage.list_candidates(
+                channel_urls=[c.url for c in self.config.channels],
+                video_ids=sorted(discovered_video_ids),
                 filter_from=options.from_utc,
                 filter_to=options.to_utc,
                 reprocess=options.reprocess,
@@ -87,6 +94,15 @@ class Orchestrator:
                 c.url: (c.language or self.config.app.default_language)
                 for c in self.config.channels
             }
+
+            if (cleanup_enabled or article_enabled) and not llm_enabled:
+                self.storage.log_run_item(
+                    run_id,
+                    video_id=None,
+                    step="llm",
+                    status="skipped",
+                    message="llm_not_configured",
+                )
 
             for candidate in candidates:
                 try:
@@ -116,9 +132,12 @@ class Orchestrator:
                     clean_path: Path | None = None
                     clean_model: str | None = None
                     clean_prompt_version: str | None = None
+                    article_path: Path | None = None
+                    article_model: str | None = None
+                    article_prompt_version: str | None = None
                     exact_hash: str | None = None
                     exact_vtt_path: Path | None = None
-                    exact_txt_path: Path | None = None
+                    exact_text_path: Path | None = None
 
                     self.storage.write_video_metadata(
                         detailed,
@@ -135,27 +154,74 @@ class Orchestrator:
                         )
                         exact_md = render_timestamped_markdown(cues)
                         exact_txt = render_plain_text(cues)
-                        exact_txt_path = self.storage.write_video_artifact(
+                        self.storage.write_video_artifact(
                             detailed.video_id, "transcript_exact.md", exact_md
                         )
-                        self.storage.write_video_artifact(
+                        exact_text_path = self.storage.write_video_artifact(
                             detailed.video_id, "transcript_exact.txt", exact_txt
                         )
                         exact_hash = _sha256(transcript.vtt_text)
 
-                        if self.config.app.enable_cleanup:
-                            cached = self.storage.find_clean_text_by_hash(exact_hash)
-                            if cached is not None:
-                                clean_text = cached
-                                clean_model = "cache"
-                                clean_prompt_version = self.config.llm.prompt_version
-                            else:
-                                clean_text, clean_model, clean_prompt_version = (
-                                    self.llm.clean_transcript(exact_txt)
+                        if cleanup_enabled and llm_enabled:
+                            try:
+                                cached = self.storage.find_clean_text_by_hash(
+                                    exact_hash
                                 )
-                            clean_path = self.storage.write_video_artifact(
-                                detailed.video_id, "transcript_clean.md", clean_text
-                            )
+                                if cached is not None:
+                                    clean_text = cached
+                                    clean_model = "cache"
+                                    clean_prompt_version = (
+                                        self.config.llm.prompt_version
+                                    )
+                                else:
+                                    clean_text, clean_model, clean_prompt_version = (
+                                        self.llm.clean_transcript(exact_txt)
+                                    )
+                                clean_path = self.storage.write_video_artifact(
+                                    detailed.video_id, "transcript_clean.md", clean_text
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                self.storage.log_run_item(
+                                    run_id,
+                                    video_id=detailed.video_id,
+                                    step="clean",
+                                    status="error",
+                                    message=str(exc),
+                                )
+
+                        if article_enabled and llm_enabled:
+                            try:
+                                (
+                                    article_text,
+                                    article_model,
+                                    article_prompt_version,
+                                ) = self.llm.write_news_article(
+                                    exact_md, detailed.title
+                                )
+                                article_path = self.storage.write_video_artifact(
+                                    detailed.video_id, "news_article.md", article_text
+                                )
+                                article_meta = {
+                                    "model": article_model,
+                                    "prompt_version": article_prompt_version,
+                                    "source": "transcript_exact.md",
+                                    "video_id": detailed.video_id,
+                                    "title": detailed.title,
+                                }
+                                self.storage.write_video_artifact(
+                                    detailed.video_id,
+                                    "news_article_metadata.json",
+                                    json.dumps(article_meta, indent=2, sort_keys=True)
+                                    + "\n",
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                self.storage.log_run_item(
+                                    run_id,
+                                    video_id=detailed.video_id,
+                                    step="article",
+                                    status="error",
+                                    message=str(exc),
+                                )
 
                     self.storage.upsert_transcript(
                         video_id=detailed.video_id,
@@ -163,10 +229,13 @@ class Orchestrator:
                         source_type=transcript.source_type,
                         exact_hash=exact_hash,
                         exact_path=exact_vtt_path,
-                        exact_text_path=exact_txt_path,
+                        exact_text_path=exact_text_path,
                         clean_path=clean_path,
                         clean_model=clean_model,
                         clean_prompt_version=clean_prompt_version,
+                        article_path=article_path,
+                        article_model=article_model,
+                        article_prompt_version=article_prompt_version,
                     )
                     self.storage.log_run_item(
                         run_id,

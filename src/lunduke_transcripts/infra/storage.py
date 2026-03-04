@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import unicodedata
 import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -25,6 +27,26 @@ def _from_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value)
+
+
+def _slugify_title(title: str, max_len: int = 80) -> str:
+    normalized = unicodedata.normalize("NFKD", title)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_text.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    if not slug:
+        slug = "untitled"
+    return slug[:max_len].strip("-")
+
+
+def _artifact_dir_name(video_id: str, title: str, published_at: datetime | None) -> str:
+    date_prefix = (
+        published_at.astimezone(UTC).date().isoformat()
+        if published_at is not None
+        else "undated"
+    )
+    slug = _slugify_title(title)
+    return f"{date_prefix}_{slug}__{video_id}"
 
 
 class Storage:
@@ -57,6 +79,7 @@ class Storage:
                 channel_name TEXT NOT NULL,
                 channel_url TEXT NOT NULL,
                 title TEXT NOT NULL,
+                artifact_dir TEXT,
                 description TEXT,
                 published_at TEXT,
                 duration_seconds INTEGER,
@@ -75,6 +98,9 @@ class Storage:
                 clean_path TEXT,
                 clean_model TEXT,
                 clean_prompt_version TEXT,
+                article_path TEXT,
+                article_model TEXT,
+                article_prompt_version TEXT,
                 captured_at TEXT NOT NULL
             );
 
@@ -102,7 +128,21 @@ class Storage:
                 FOREIGN KEY (run_id) REFERENCES runs (run_id)
             );
             """)
+        self._ensure_column("videos", "artifact_dir", "TEXT")
+        self._ensure_column("transcripts", "article_path", "TEXT")
+        self._ensure_column("transcripts", "article_model", "TEXT")
+        self._ensure_column("transcripts", "article_prompt_version", "TEXT")
         self.conn.commit()
+
+    def _ensure_column(
+        self, table_name: str, column_name: str, column_definition: str
+    ) -> None:
+        rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing = {row["name"] for row in rows}
+        if column_name not in existing:
+            self.conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            )
 
     def close(self) -> None:
         if self._conn is not None:
@@ -177,18 +217,23 @@ class Storage:
 
     def upsert_video(self, video: VideoRecord) -> None:
         now_iso = _iso(datetime.now(tz=UTC))
+        artifact_dir = _artifact_dir_name(
+            video.video_id, video.title, video.published_at
+        )
         self.conn.execute(
             """
             INSERT INTO videos (
-                video_id, channel_id, channel_name, channel_url, title, description,
+                video_id, channel_id, channel_name, channel_url, title,
+                artifact_dir, description,
                 published_at, duration_seconds, video_url, first_seen_at, last_seen_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 channel_id=excluded.channel_id,
                 channel_name=excluded.channel_name,
                 channel_url=excluded.channel_url,
                 title=excluded.title,
+                artifact_dir=COALESCE(videos.artifact_dir, excluded.artifact_dir),
                 description=COALESCE(excluded.description, videos.description),
                 published_at=COALESCE(excluded.published_at, videos.published_at),
                 duration_seconds=COALESCE(
@@ -203,6 +248,7 @@ class Storage:
                 video.channel_name,
                 video.channel_url,
                 video.title,
+                artifact_dir,
                 video.description,
                 _iso(video.published_at),
                 video.duration_seconds,
@@ -212,6 +258,39 @@ class Storage:
             ),
         )
         self.conn.commit()
+
+    def _video_dir_for(
+        self,
+        video_id: str,
+        title: str | None = None,
+        published_at: datetime | None = None,
+    ) -> Path:
+        row = self.conn.execute(
+            "SELECT artifact_dir, title, published_at FROM videos WHERE video_id = ?",
+            (video_id,),
+        ).fetchone()
+        if row is None:
+            resolved_title = title or video_id
+            artifact_dir = _artifact_dir_name(video_id, resolved_title, published_at)
+        else:
+            artifact_dir = row["artifact_dir"]
+            if not artifact_dir:
+                resolved_title = title or row["title"] or video_id
+                resolved_published = _from_iso(row["published_at"]) or published_at
+                artifact_dir = _artifact_dir_name(
+                    video_id, resolved_title, resolved_published
+                )
+                self.conn.execute(
+                    "UPDATE videos SET artifact_dir = ? WHERE video_id = ?",
+                    (artifact_dir, video_id),
+                )
+                self.conn.commit()
+
+        video_dir = self.videos_dir / artifact_dir
+        legacy_dir = self.videos_dir / video_id
+        if legacy_dir.exists() and legacy_dir != video_dir and not video_dir.exists():
+            legacy_dir.rename(video_dir)
+        return video_dir
 
     def get_video(self, video_id: str) -> VideoRecord | None:
         row = self.conn.execute(
@@ -234,6 +313,8 @@ class Storage:
     def list_candidates(
         self,
         *,
+        channel_urls: list[str] | None,
+        video_ids: list[str] | None,
         filter_from: datetime | None,
         filter_to: datetime | None,
         reprocess: bool,
@@ -250,6 +331,14 @@ class Storage:
             _iso(filter_to),
             _iso(filter_to),
         ]
+        if channel_urls:
+            placeholders = ", ".join("?" for _ in channel_urls)
+            query += f" AND v.channel_url IN ({placeholders})"
+            params.extend(channel_urls)
+        if video_ids:
+            placeholders = ", ".join("?" for _ in video_ids)
+            query += f" AND v.video_id IN ({placeholders})"
+            params.extend(video_ids)
         if not reprocess:
             query += (
                 " AND NOT EXISTS (SELECT 1 FROM transcripts t "
@@ -275,11 +364,14 @@ class Storage:
     def write_video_metadata(
         self, video: VideoRecord, transcript_source: str, language: str | None
     ) -> Path:
-        video_dir = self.videos_dir / video.video_id
+        video_dir = self._video_dir_for(
+            video.video_id, title=video.title, published_at=video.published_at
+        )
         video_dir.mkdir(parents=True, exist_ok=True)
         metadata_path = video_dir / "metadata.json"
         payload = {
             **asdict(video),
+            "artifact_dir": video_dir.name,
             "published_at": _iso(video.published_at),
             "captured_at": _iso(datetime.now(tz=UTC)),
             "transcript_source": transcript_source,
@@ -291,7 +383,7 @@ class Storage:
         return metadata_path
 
     def write_video_artifact(self, video_id: str, filename: str, content: str) -> Path:
-        video_dir = self.videos_dir / video_id
+        video_dir = self._video_dir_for(video_id)
         video_dir.mkdir(parents=True, exist_ok=True)
         path = video_dir / filename
         path.write_text(content, encoding="utf-8")
@@ -309,15 +401,19 @@ class Storage:
         clean_path: Path | None,
         clean_model: str | None,
         clean_prompt_version: str | None,
+        article_path: Path | None,
+        article_model: str | None,
+        article_prompt_version: str | None,
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO transcripts (
                 video_id, language, source_type, exact_hash, exact_path,
                 exact_text_path, clean_path, clean_model,
-                clean_prompt_version, captured_at
+                clean_prompt_version, article_path, article_model,
+                article_prompt_version, captured_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 language=excluded.language,
                 source_type=excluded.source_type,
@@ -327,6 +423,9 @@ class Storage:
                 clean_path=excluded.clean_path,
                 clean_model=excluded.clean_model,
                 clean_prompt_version=excluded.clean_prompt_version,
+                article_path=excluded.article_path,
+                article_model=excluded.article_model,
+                article_prompt_version=excluded.article_prompt_version,
                 captured_at=excluded.captured_at
             """,
             (
@@ -339,6 +438,9 @@ class Storage:
                 str(clean_path) if clean_path else None,
                 clean_model,
                 clean_prompt_version,
+                str(article_path) if article_path else None,
+                article_model,
+                article_prompt_version,
                 _iso(datetime.now(tz=UTC)),
             ),
         )

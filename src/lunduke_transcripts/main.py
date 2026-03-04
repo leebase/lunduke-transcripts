@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from lunduke_transcripts import __version__
 from lunduke_transcripts.app.orchestrator import Orchestrator
-from lunduke_transcripts.config import load_config
+from lunduke_transcripts.config import load_config, load_env_file
 from lunduke_transcripts.domain.models import RunOptions
 from lunduke_transcripts.infra.llm_adapter import LLMAdapter
 from lunduke_transcripts.infra.storage import Storage
@@ -58,12 +58,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reprocess videos even if previously handled",
     )
+    run_parser.add_argument(
+        "--article",
+        action="store_true",
+        help="Generate a faithful news-style article from the exact transcript",
+    )
+    run_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="Path to env file for provider/model/API keys (default: .env)",
+    )
     return parser
 
 
 def run_command(args: argparse.Namespace) -> int:
     """Execute the run pipeline command."""
 
+    load_env_file(args.env_file)
     config = load_config(args.config)
     from_utc = (
         _parse_date(args.from_date, config.app.timezone, end_of_day=False)
@@ -98,6 +109,7 @@ def run_command(args: argparse.Namespace) -> int:
             from_utc=from_utc,
             to_utc=to_utc,
             reprocess=bool(args.reprocess),
+            generate_article=bool(args.article),
         )
     )
 

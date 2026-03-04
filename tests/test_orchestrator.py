@@ -71,12 +71,28 @@ class FakeYouTubeAdapter:
 
 class FakeLLMAdapter:
     def __init__(self) -> None:
-        self.calls = 0
+        self.clean_calls = 0
+        self.article_calls = 0
         self.prompt_version = "v1"
 
+    def is_enabled(self) -> bool:
+        return True
+
     def clean_transcript(self, exact_transcript: str) -> tuple[str, str, str]:
-        self.calls += 1
+        self.clean_calls += 1
         return exact_transcript.upper(), "fake-model", self.prompt_version
+
+    def write_news_article(
+        self, exact_markdown_transcript: str, video_title: str | None
+    ) -> tuple[str, str, str]:
+        self.article_calls += 1
+        title = video_title or "Untitled"
+        body = (
+            exact_markdown_transcript.splitlines()[0]
+            if exact_markdown_transcript
+            else ""
+        )
+        return f"# {title}\n\n{body}\n", "fake-model", self.prompt_version
 
 
 def _config(tmp_path) -> Config:
@@ -139,4 +155,29 @@ def test_date_range_and_idempotency(tmp_path) -> None:
     )
     assert summary_three.videos_new == 1
     assert summary_three.videos_processed == 1
-    assert llm.calls >= 1
+    assert llm.clean_calls >= 1
+
+
+def test_article_generation_writes_artifacts(tmp_path) -> None:
+    config = _config(tmp_path)
+    config = Config(
+        app=AppConfig(
+            data_dir=tmp_path / "data", enable_cleanup=False, enable_article=False
+        ),
+        llm=config.llm,
+        channels=config.channels,
+    )
+    storage = Storage(config.app.data_dir)
+    youtube = FakeYouTubeAdapter()
+    llm = FakeLLMAdapter()
+    orchestrator = Orchestrator(
+        config=config, storage=storage, youtube=youtube, llm=llm
+    )
+    summary = orchestrator.run(
+        RunOptions(config_path=tmp_path / "channels.toml", generate_article=True)
+    )
+    assert summary.videos_processed > 0
+    assert llm.article_calls > 0
+
+    article_files = list((tmp_path / "data" / "videos").glob("*/news_article.md"))
+    assert article_files, "Expected generated news_article.md files"

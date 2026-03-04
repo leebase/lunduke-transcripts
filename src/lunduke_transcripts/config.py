@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ class AppConfig:
     default_language: str = "en"
     timezone: str = "America/Chicago"
     enable_cleanup: bool = True
+    enable_article: bool = False
     yt_dlp_binary: str = "yt-dlp"
     fetch_retries: int = 2
     retry_backoff_seconds: int = 2
@@ -57,6 +59,37 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _parse_bool(raw: str | bool | None, default: bool) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def load_env_file(path: str | Path = ".env") -> None:
+    """Load simple KEY=VALUE pairs into environment without overriding existing vars."""
+
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def load_config(path: str | Path) -> Config:
     """Load TOML config from disk with safe defaults."""
 
@@ -74,7 +107,14 @@ def load_config(path: str | Path) -> Config:
         data_dir=Path(app_raw.get("data_dir", "data")),
         default_language=str(app_raw.get("default_language", "en")),
         timezone=str(app_raw.get("timezone", "America/Chicago")),
-        enable_cleanup=bool(app_raw.get("enable_cleanup", True)),
+        enable_cleanup=_parse_bool(
+            os.getenv("ENABLE_CLEANUP"),
+            _parse_bool(app_raw.get("enable_cleanup"), True),
+        ),
+        enable_article=_parse_bool(
+            os.getenv("ENABLE_ARTICLE"),
+            _parse_bool(app_raw.get("enable_article"), False),
+        ),
         yt_dlp_binary=str(app_raw.get("yt_dlp_binary", "yt-dlp")),
         fetch_retries=int(app_raw.get("fetch_retries", 2)),
         retry_backoff_seconds=int(app_raw.get("retry_backoff_seconds", 2)),
@@ -86,9 +126,11 @@ def load_config(path: str | Path) -> Config:
     )
 
     llm = LLMConfig(
-        provider=str(llm_raw.get("provider", "openai")),
-        model=str(llm_raw.get("model", "gpt-4.1-mini")),
-        prompt_version=str(llm_raw.get("prompt_version", "v1")),
+        provider=str(os.getenv("LLM_PROVIDER", llm_raw.get("provider", "openai"))),
+        model=str(os.getenv("LLM_MODEL", llm_raw.get("model", "gpt-4.1-mini"))),
+        prompt_version=str(
+            os.getenv("LLM_PROMPT_VERSION", llm_raw.get("prompt_version", "v1"))
+        ),
     )
 
     channels: list[ChannelConfig] = []
