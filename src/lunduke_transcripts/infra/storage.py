@@ -132,6 +132,7 @@ class Storage:
         self._ensure_column("transcripts", "article_path", "TEXT")
         self._ensure_column("transcripts", "article_model", "TEXT")
         self._ensure_column("transcripts", "article_prompt_version", "TEXT")
+        self._migrate_undated_artifact_dirs()
         self.conn.commit()
 
     def _ensure_column(
@@ -143,6 +144,96 @@ class Storage:
             self.conn.execute(
                 f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
             )
+
+    def _migrate_undated_artifact_dirs(self) -> None:
+        rows = self.conn.execute(
+            "SELECT video_id, title, published_at, artifact_dir FROM videos"
+        ).fetchall()
+        for row in rows:
+            published_at = _from_iso(row["published_at"])
+            expected = _artifact_dir_name(row["video_id"], row["title"], published_at)
+            current = row["artifact_dir"]
+            if not current:
+                self.conn.execute(
+                    "UPDATE videos SET artifact_dir = ? WHERE video_id = ?",
+                    (expected, row["video_id"]),
+                )
+                current = expected
+            if current.startswith("undated_") and published_at is not None:
+                self.conn.execute(
+                    "UPDATE videos SET artifact_dir = ? WHERE video_id = ?",
+                    (expected, row["video_id"]),
+                )
+                current = expected
+
+            target_dir = self.videos_dir / current
+            self._adopt_legacy_dirs(row["video_id"], target_dir)
+
+    def _legacy_dirs_for_video(self, video_id: str, target_dir: Path) -> list[Path]:
+        candidates: list[Path] = []
+        video_id_dir = self.videos_dir / video_id
+        if video_id_dir.exists() and video_id_dir != target_dir:
+            candidates.append(video_id_dir)
+        for match in sorted(self.videos_dir.glob(f"*__{video_id}")):
+            if match != target_dir and match.exists():
+                candidates.append(match)
+        return candidates
+
+    def _adopt_legacy_dirs(self, video_id: str, target_dir: Path) -> None:
+        legacy_dirs = self._legacy_dirs_for_video(video_id, target_dir)
+        for old_dir in legacy_dirs:
+            if not target_dir.exists():
+                old_dir.rename(target_dir)
+            else:
+                for child in old_dir.iterdir():
+                    destination = target_dir / child.name
+                    if destination.exists():
+                        continue
+                    child.rename(destination)
+                try:
+                    old_dir.rmdir()
+                except OSError:
+                    # Keep non-empty directories untouched if collisions
+                    # left files behind.
+                    pass
+            self._rewrite_transcript_paths(video_id, old_dir, target_dir)
+
+    def _rewrite_transcript_paths(
+        self, video_id: str, old_dir: Path, new_dir: Path
+    ) -> None:
+        row = self.conn.execute(
+            """
+            SELECT exact_path, exact_text_path, clean_path, article_path
+            FROM transcripts
+            WHERE video_id = ?
+            """,
+            (video_id,),
+        ).fetchone()
+        if row is None:
+            return
+
+        def rewrite(value: str | None) -> str | None:
+            if not value:
+                return value
+            old_prefix = str(old_dir) + "/"
+            if value.startswith(old_prefix):
+                return str(new_dir / value.removeprefix(old_prefix))
+            return value
+
+        self.conn.execute(
+            """
+            UPDATE transcripts
+            SET exact_path = ?, exact_text_path = ?, clean_path = ?, article_path = ?
+            WHERE video_id = ?
+            """,
+            (
+                rewrite(row["exact_path"]),
+                rewrite(row["exact_text_path"]),
+                rewrite(row["clean_path"]),
+                rewrite(row["article_path"]),
+                video_id,
+            ),
+        )
 
     def close(self) -> None:
         if self._conn is not None:
@@ -233,7 +324,11 @@ class Storage:
                 channel_name=excluded.channel_name,
                 channel_url=excluded.channel_url,
                 title=excluded.title,
-                artifact_dir=COALESCE(videos.artifact_dir, excluded.artifact_dir),
+                artifact_dir=CASE
+                    WHEN excluded.published_at IS NOT NULL THEN excluded.artifact_dir
+                    WHEN videos.artifact_dir IS NULL THEN excluded.artifact_dir
+                    ELSE videos.artifact_dir
+                END,
                 description=COALESCE(excluded.description, videos.description),
                 published_at=COALESCE(excluded.published_at, videos.published_at),
                 duration_seconds=COALESCE(
@@ -274,9 +369,12 @@ class Storage:
             artifact_dir = _artifact_dir_name(video_id, resolved_title, published_at)
         else:
             artifact_dir = row["artifact_dir"]
-            if not artifact_dir:
+            row_published = _from_iso(row["published_at"]) or published_at
+            if not artifact_dir or (
+                artifact_dir.startswith("undated_") and row_published is not None
+            ):
                 resolved_title = title or row["title"] or video_id
-                resolved_published = _from_iso(row["published_at"]) or published_at
+                resolved_published = row_published
                 artifact_dir = _artifact_dir_name(
                     video_id, resolved_title, resolved_published
                 )
@@ -287,9 +385,7 @@ class Storage:
                 self.conn.commit()
 
         video_dir = self.videos_dir / artifact_dir
-        legacy_dir = self.videos_dir / video_id
-        if legacy_dir.exists() and legacy_dir != video_dir and not video_dir.exists():
-            legacy_dir.rename(video_dir)
+        self._adopt_legacy_dirs(video_id, video_dir)
         return video_dir
 
     def get_video(self, video_id: str) -> VideoRecord | None:
