@@ -381,6 +381,18 @@ def run_command(args: argparse.Namespace) -> int:
         backoff_seconds=config.app.retry_backoff_seconds,
     )
     asr_plugin = build_asr_plugin(config.app)
+    router_repo_path = _resolve_config_relative_path(
+        config.llm.router_repo_path,
+        config_path.parent,
+    )
+    router_config_path = _resolve_config_relative_path(
+        config.llm.router_config_path,
+        config_path.parent,
+    )
+    router_trace_dir = _resolve_config_relative_path(
+        config.llm.router_trace_dir,
+        config_path.parent,
+    )
     llm = LLMAdapter(
         provider=config.llm.provider,
         model=config.llm.model,
@@ -388,6 +400,11 @@ def run_command(args: argparse.Namespace) -> int:
         timeout_seconds=config.llm.timeout_seconds,
         retries=config.llm.retries,
         retry_backoff_seconds=config.llm.retry_backoff_seconds,
+        router_enabled=config.llm.router_enabled,
+        router_repo_path=router_repo_path,
+        router_config_path=router_config_path,
+        router_trace_dir=router_trace_dir,
+        router_roles=config.llm.router_roles,
     )
     local_media = LocalMediaAdapter(
         ffmpeg_binary=config.app.ffmpeg_binary,
@@ -443,6 +460,18 @@ def tutorial_command(args: argparse.Namespace) -> int:
         config = load_config(config_path)
     else:
         config = default_config_from_env()
+    router_repo_path = _resolve_config_relative_path(
+        config.llm.router_repo_path,
+        config_path.parent,
+    )
+    router_config_path = _resolve_config_relative_path(
+        config.llm.router_config_path,
+        config_path.parent,
+    )
+    router_trace_dir = _resolve_config_relative_path(
+        config.llm.router_trace_dir,
+        config_path.parent,
+    )
     llm = LLMAdapter(
         provider=config.llm.provider,
         model=config.llm.model,
@@ -450,6 +479,11 @@ def tutorial_command(args: argparse.Namespace) -> int:
         timeout_seconds=config.llm.timeout_seconds,
         retries=config.llm.retries,
         retry_backoff_seconds=config.llm.retry_backoff_seconds,
+        router_enabled=config.llm.router_enabled,
+        router_repo_path=router_repo_path,
+        router_config_path=router_config_path,
+        router_trace_dir=router_trace_dir,
+        router_roles=config.llm.router_roles,
     )
     pipeline = TutorialPipeline(
         llm=llm,
@@ -530,6 +564,15 @@ def render_command(args: argparse.Namespace) -> int:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _resolve_config_relative_path(value: str | None, config_dir: Path) -> str | None:
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str((config_dir / path).resolve())
 
 
 def main() -> None:

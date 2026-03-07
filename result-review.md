@@ -6,6 +6,89 @@
 
 ---
 
+## 2026-03-07 — Selective ChatGPT Plus GPT-5.4 Tutorial Routing
+
+Integrated `lee-llm-router` into the tutorial pipeline so the expensive
+editorial stages can use ChatGPT Plus `gpt-5.4` while the cheaper planning and
+evidence stages remain on cheaper OpenRouter roles.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Router integration | Added optional router config/env support and task-to-role routing in the lunduke LLM adapter and CLI wiring |
+| Provider fixes | Fixed the `lee-llm-router` ChatGPT subscription provider to send `instructions`, use SSE streaming, stop cleanly on completion, and avoid unsupported `temperature` |
+| Path handling | Resolved router repo/config/trace paths relative to the selected config file instead of the current working directory |
+| Validation | Added provider tests for streamed SSE responses plus CLI regression coverage for config-relative router paths |
+| Live verification | Re-ran `AgentFlowComplete_compressed.mp4` through the real tutorial flow and confirmed it now exits `blocked` cleanly instead of hanging in the review loop |
+
+### Why It Matters
+
+- Uses a stronger model where it matters most without paying for it in the easy
+  transcript/planning stages.
+- Removes the runtime failure mode that previously left the real screencast
+  tutorial flow hanging after draft/review generation.
+- Makes router-backed configs more portable because they no longer depend on
+  launching the CLI from the repo root.
+
+### How to Verify
+
+1. Run targeted checks:
+   - `./.venv/bin/pytest -q tests/test_main_cli.py tests/test_llm_adapter.py tests/test_config_env.py`
+   - `./.venv/bin/ruff check src/lunduke_transcripts/main.py tests/test_main_cli.py`
+   - `./.venv/bin/black --check src/lunduke_transcripts/main.py tests/test_main_cli.py`
+   - `./.venv/bin/pytest -q tests/test_providers.py` in `~/projects/lee-llm-router`
+2. Confirm router config points expensive roles at ChatGPT Plus `gpt-5.4` in [config/tutorial-llm-router.yaml](config/tutorial-llm-router.yaml).
+3. Run the real screencast tutorial flow:
+   - `.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --reprocess --max-review-cycles 1 --config config/channels.toml --env-file .env`
+4. Verify the result is a clean `blocked` JSON payload rather than a hang.
+5. Inspect the fresh traces under `.agentleeops/traces/20260307/` and confirm:
+   - `tutorial_writer` used `gpt-5.4`
+   - `tutorial_reviewer` used `gpt-5.4`
+   - `tutorial_redteam` used `gpt-5.4`
+6. Note the current product-quality outcome: the screencast still fails review, so the latest fresh artifact is `tutorial_draft.md`, not a republished `tutorial_final.pdf`.
+
+## 2026-03-07 — Tutorial Quality Refinement and Review Hardening
+
+Implemented a tutorial-quality refinement pass focused on making the published
+Markdown behave like a real public tutorial rather than a transcript-shaped
+artifact.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Tutorial skills | Added `tutorial-narrative`, `public-artifact-hygiene`, `tutorial-navigation`, `tutorial-step-selection`, and `tutorial-quality-review` |
+| Agent updates | Updated planner, writer, technical reviewer, and adversarial reviewer role files to use the new tutorial-specific skills |
+| Public artifact rules | Writer prompts and validation now require context, a table of contents, per-section back-to-top links, and no leaked `Evidence:` callouts in final Markdown |
+| Review semantics | Changed adversarial review to advisory-only while keeping it mandatory before publish |
+| Review remediation | Ran a formal code review, found validator contract/navigation gaps, and fixed both with regression coverage |
+| Validation | Added tests for evidence leakage, definition-controlled structure requirements, and per-section navigation enforcement |
+
+### Why It Matters
+
+- Moves the system closer to producing something publishable as the speaker's
+  tutorial instead of a cleaned-up transcript.
+- Separates public tutorial prose from internal grounding artifacts more
+  cleanly.
+- Makes the tutorial contract more honest by enforcing the same navigation and
+  hygiene rules the prompts now ask for.
+
+### How to Verify
+
+1. Run checks:
+   - `.venv/bin/ruff check src tests`
+   - `.venv/bin/black --check src tests`
+   - `.venv/bin/pytest -q`
+2. Regenerate a tutorial bundle through the `tutorial` CLI with `--approve-outline --reprocess`.
+3. Inspect `tutorial_draft.md` and confirm:
+   - it starts with context
+   - it has a table of contents
+   - each major section includes `[Back to top](#top)`
+   - it does not contain `Evidence:`
+4. Review `code-reviews/review-2026-03-06.md` for the formal review artifact.
+5. Note the current gap: on the real `AgentFlowComplete_compressed.mp4` screencast, the live rerun stalled after `tutorial_draft.md` and `tutorial_validation_report.json`, so the end-to-end LLM review stage still needs reliability work.
+
 ## 2026-03-06 — Downstream PDF Renderer Delivered
 
 Implemented a downstream renderer that converts a published tutorial manifest

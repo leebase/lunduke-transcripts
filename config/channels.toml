@@ -29,6 +29,18 @@ prompt_version = "v1"
 timeout_seconds = 60
 retries = 2
 retry_backoff_seconds = 2
+router_enabled = true
+router_repo_path = "/Users/leeharrington/projects/lee-llm-router"
+router_config_path = "config/tutorial-llm-router.yaml"
+
+[llm.router_roles]
+"tutorial.educator" = "tutorial_educator"
+"tutorial.planner" = "tutorial_planner"
+"tutorial.evidence" = "tutorial_evidence"
+"tutorial.visual" = "tutorial_visual"
+"tutorial.writer" = "tutorial_writer"
+"tutorial.technical-review" = "tutorial_reviewer"
+"tutorial.adversarial-review" = "tutorial_redteam"
 
 # Add one or more channels:
 # [[channels]]

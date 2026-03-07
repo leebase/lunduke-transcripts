@@ -77,3 +77,64 @@ was rejected because it hides real image-validation failures.
 The pipeline removes stale render outputs before each attempt, and it prefers
 Google Chrome on macOS when available because Chromium may not exit cleanly
 after writing headless PDFs.
+
+## 2026-03-07 — Adversarial tutorial review is mandatory but advisory-only
+
+**Decision:** The tutorial pipeline always runs the adversarial reviewer before a
+tutorial is publish-eligible, but adversarial findings cannot block publication
+on their own.
+
+**Rationale:** The adversarial pass is there to inject counter-narrative pressure
+and catch overreach, not to overpower the validator and technical reviewer. That
+keeps the red-team role useful without turning every objection into a veto.
+
+**Alternatives rejected:** Treating adversarial review as a hard gate made the
+pipeline overweight objections and pushed it toward overly defensive output.
+Skipping adversarial review entirely would remove an important source of
+pressure-testing before publish.
+
+**Consequences:** Validation and technical review remain the hard publish gates.
+Adversarial findings can trigger reroute cycles and remain visible as warnings in
+the manifest when unresolved.
+
+## 2026-03-07 — Public tutorial Markdown enforces navigation and internal-note hygiene
+
+**Decision:** Published tutorial Markdown is a public artifact with required
+reader-facing structure: context, table of contents, back-to-top navigation, and
+no leaked evidence/provenance callouts.
+
+**Rationale:** Grounding artifacts are useful for the pipeline, but they do not
+belong in reader-facing tutorials. The final Markdown has to read like a real
+tutorial, not a transcript with internal scaffolding attached.
+
+**Alternatives rejected:** Relying on prompts alone let internal review language
+and weak navigation leak into outputs. Leaving these checks entirely to later
+review agents made the contract too soft.
+
+**Consequences:** The validator now enforces public-artifact structure, and the
+writer/reviewer prompts explicitly separate sidecar evidence artifacts from the
+final tutorial. Tutorial definition flags can relax these requirements when a
+future format legitimately needs a different structure.
+
+## 2026-03-07 — Expensive tutorial stages route through `lee-llm-router`
+
+**Decision:** Tutorial planning/evidence stages may stay on cheaper API models,
+but the expensive editorial stages (`tutorial.writer`,
+`tutorial.technical-review`, and `tutorial.adversarial-review`) route through
+`lee-llm-router` so they can use the local ChatGPT Plus `gpt-5.4` access path.
+
+**Rationale:** The strongest model quality is most valuable when the pipeline is
+writing or judging public tutorial prose. Using it for the easy extraction or
+planning stages adds cost and latency without a matching benefit.
+
+**Alternatives rejected:** A full global switch to the strongest model would
+increase cost and latency across the whole app. Keeping everything on the
+smaller API model left the tutorial pipeline too weak editorially. Calling the
+raw ChatGPT backend directly from the app would duplicate provider logic that
+already belongs in `lee-llm-router`.
+
+**Consequences:** The lunduke CLI now accepts router config/env settings and
+task-role mappings. Router paths are resolved relative to the selected config
+file so users can launch the CLI from outside the repo root. The subscription
+provider in `lee-llm-router` now sends `instructions`, uses SSE, stops on the
+completion signal, and omits unsupported `temperature`.

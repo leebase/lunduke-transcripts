@@ -51,6 +51,11 @@ class LLMConfig:
     timeout_seconds: int = 60
     retries: int = 2
     retry_backoff_seconds: int = 2
+    router_enabled: bool = False
+    router_repo_path: str | None = None
+    router_config_path: str | None = None
+    router_trace_dir: str | None = None
+    router_roles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -250,6 +255,42 @@ def _build_config(
                 llm_raw.get("retry_backoff_seconds", 2),
             )
         ),
+        router_enabled=_parse_bool(
+            os.getenv("LLM_ROUTER_ENABLED"),
+            _parse_bool(llm_raw.get("router_enabled"), False),
+        ),
+        router_repo_path=(
+            str(
+                os.getenv(
+                    "LLM_ROUTER_REPO_PATH",
+                    llm_raw.get("router_repo_path", ""),
+                )
+            ).strip()
+            or None
+        ),
+        router_config_path=(
+            str(
+                os.getenv(
+                    "LLM_ROUTER_CONFIG_PATH",
+                    llm_raw.get("router_config_path", ""),
+                )
+            ).strip()
+            or None
+        ),
+        router_trace_dir=(
+            str(
+                os.getenv(
+                    "LLM_ROUTER_TRACE_DIR",
+                    llm_raw.get("router_trace_dir", ""),
+                )
+            ).strip()
+            or None
+        ),
+        router_roles={
+            str(key): str(value)
+            for key, value in _as_dict(llm_raw.get("router_roles")).items()
+            if str(key).strip() and str(value).strip()
+        },
     )
 
     channels: list[ChannelConfig] = []

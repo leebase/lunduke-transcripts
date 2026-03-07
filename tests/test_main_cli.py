@@ -189,6 +189,86 @@ def test_tutorial_command_uses_bundle_without_config(monkeypatch, tmp_path) -> N
     assert main_mod.tutorial_command(args) == 0
 
 
+def test_tutorial_command_resolves_router_paths_relative_to_config(
+    monkeypatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeLLM:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured.update(kwargs)
+
+    class _FakeRegistry:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakePipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            _ = kwargs
+            from lunduke_transcripts.domain.models import TutorialSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            manifest_path = tutorial_dir / "tutorial_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            return TutorialSummary(
+                status="awaiting_outline_approval",
+                tutorial_dir=tutorial_dir,
+                manifest_path=manifest_path,
+                human_outline_approved=False,
+                publish_eligible=False,
+            )
+
+    monkeypatch.setattr(main_mod, "LLMAdapter", _FakeLLM)
+    monkeypatch.setattr(main_mod, "TutorialAgentRegistry", _FakeRegistry)
+    monkeypatch.setattr(main_mod, "TutorialPipeline", _FakePipeline)
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_path = config_dir / "channels.toml"
+    config_path.write_text(
+        """
+[llm]
+provider = "openrouter"
+model = "openai/gpt-4.1-mini"
+router_enabled = true
+router_repo_path = "../lee-llm-router"
+router_config_path = "tutorial-llm-router.yaml"
+router_trace_dir = "../traces"
+
+[llm.router_roles]
+"tutorial.writer" = "tutorial_writer"
+""".strip() + "\n",
+        encoding="utf-8",
+    )
+
+    bundle_path = tmp_path / "tutorial_asset_bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+    args = Namespace(
+        command="tutorial",
+        bundle=str(bundle_path),
+        config=str(config_path),
+        env_file=str(tmp_path / "missing.env"),
+        approve_outline=False,
+        reprocess=False,
+        max_review_cycles=1,
+        agents_dir=str(tmp_path / "agents"),
+        skills_dir=str(tmp_path / "skills"),
+    )
+
+    assert main_mod.tutorial_command(args) == 0
+    assert captured["router_repo_path"] == str(
+        (config_dir / "../lee-llm-router").resolve()
+    )
+    assert captured["router_config_path"] == str(
+        (config_dir / "tutorial-llm-router.yaml").resolve()
+    )
+    assert captured["router_trace_dir"] == str((config_dir / "../traces").resolve())
+
+
 def test_tutorial_command_reports_runtime_failure(monkeypatch, tmp_path) -> None:
     class _FakeLLM:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003

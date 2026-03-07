@@ -10,9 +10,9 @@
 |-----------|-------|
 | **Project** | lunduke-transcripts |
 | **Profile** | Python Package |
-| **Current Phase** | Phase 5 — Tutorial Rendering Delivered |
-| **Overall Status** | 🟢 Extraction, reviewed Markdown tutorials, and downstream PDF rendering shipped |
-| **Last Updated** | 2026-03-06 |
+| **Current Phase** | Phase 6 — Tutorial Quality Refinement |
+| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality is the remaining constraint |
+| **Last Updated** | 2026-03-07 |
 
 ---
 
@@ -41,6 +41,9 @@
 | Ship source-agnostic tutorial asset extraction | ✅ Done | Local file ingest, frame extraction, degraded bundle handling, and bundle artifacts implemented |
 | Ship downstream multi-agent written tutorial generation | ✅ Done | `tutorial` CLI, approval gate, validation, review, revision, and final Markdown output are implemented |
 | Ship downstream tutorial rendering | ✅ Done | `render` CLI, image validation, HTML staging, PDF output, and render manifests are implemented |
+| Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, and advisory adversarial review are in; current real screencast reruns now block on content quality instead of runtime reliability |
+| Make real screencast tutorial reruns finish reliably | ✅ Done | `tutorial --approve-outline --reprocess` now completes cleanly on the real screencast and returns `blocked` instead of hanging |
+| Route expensive tutorial stages through ChatGPT Plus `gpt-5.4` | ✅ Done | `lee-llm-router` now handles tutorial writing/review/red-team while cheap stages stay on cheaper OpenRouter models |
 
 ---
 
@@ -48,6 +51,7 @@
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
+| Sprint 10 — Tutorial Quality Refinement | Public tutorial quality + selective strong-model routing | ⏳ Active |
 | Sprint 9 — Tutorial PDF Rendering | Downstream HTML/PDF renderer with image validation | ✅ Complete |
 | Sprint 8 — Multi-Agent Tutorial Generation | Approval-gated tutorial drafting, validation, and review | ✅ Complete |
 | Sprint 7 — Tutorial Asset Extraction Foundation | Transcript JSON + frame manifest + bundle | ✅ Complete with remediation |
@@ -67,6 +71,7 @@
 | Frame extraction thresholds may be noisy | Too many or weak screenshots | 🟡 Next tuning target |
 | Candidate frames are not yet semantically ranked | Renderers may get too many screenshots | 🟡 Deferred to next phase |
 | Missing captions for some videos | Partial transcript coverage | 🟢 Handled with ASR fallback path |
+| Real screencast tutorial still blocks review | Fresh final Markdown/PDF will not be republished until the content clears validation/review | 🟡 Active product-quality constraint |
 
 ---
 
@@ -90,6 +95,10 @@
 | Tutorial rendering is a downstream format step | Keeps content generation independent from document formatting and rerendering | 2026-03-06 |
 | Tutorial image validation happens before render | Prevents screenshot-heavy PDFs from silently dropping broken image references | 2026-03-06 |
 | Chrome-family HTML-to-PDF rendering is the first PDF backend | Browser layout handles screenshot-heavy tutorials better than a direct PDF path | 2026-03-06 |
+| Adversarial tutorial review is advisory-only | Red-team pressure should trigger reconsideration, not become an automatic veto | 2026-03-07 |
+| Final tutorial Markdown enforces public-artifact hygiene and navigation | Reader-facing tutorials must keep evidence/provenance in sidecars and include basic navigation | 2026-03-07 |
+| Strong-model tutorial stages run through `lee-llm-router` | ChatGPT Plus `gpt-5.4` is reserved for tutorial writing/review/red-team while cheap stages remain inexpensive | 2026-03-07 |
+| Router paths are resolved relative to the chosen config file | Running the CLI from another working directory must not break router configs or traces | 2026-03-07 |
 
 ---
 
@@ -107,6 +116,7 @@
 
 Phase 6 tutorial quality and format expansion:
 
-1. improve frame selection quality
+1. improve step selection so incidental environment setup does not dominate tutorials
 2. improve tutorial voice and ghostwriting quality
-3. add the next renderer target after PDF
+3. decide whether blocked tutorials should still render a draft PDF for review
+4. add the next renderer target after PDF

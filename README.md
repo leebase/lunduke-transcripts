@@ -33,6 +33,15 @@ renderer will prefer Google Chrome if it is installed, then fall back to
    - `LLM_PROVIDER=openrouter`
    - `LLM_MODEL=openai/gpt-4.1-mini` (or your preferred OpenRouter model)
    - `OPENROUTER_API_KEY=...`
+5. Optional: route selected tutorial writing/review tasks through
+   `lee-llm-router` and ChatGPT subscription credentials:
+   - copy [config/tutorial-llm-router.example.yaml](config/tutorial-llm-router.example.yaml)
+     to `config/tutorial-llm-router.yaml`
+   - enable `[llm].router_enabled = true`
+    - set `[llm].router_repo_path` to your local `lee-llm-router` checkout
+   - map only the expensive tutorial tasks under `[llm.router_roles]`
+   - router paths are resolved relative to the config file, so the CLI does not
+     need to be launched from the repo root
 
 ## CLI
 
@@ -88,6 +97,14 @@ The `tutorial` command is a downstream pipeline that consumes an existing
   - validates structure and evidence coverage
   - runs technical review plus adversarial review
   - writes `tutorial_final.md` only if the tutorial clears the review gate
+- Published tutorial Markdown is intended to be reader-facing:
+  - context first
+  - table of contents plus back-to-top navigation
+  - screenshots inline
+  - evidence/provenance stays in JSON sidecars, not the final Markdown
+- The adversarial review is mandatory, but advisory-only:
+  - it can trigger rewrite/reroute cycles
+  - it does not block publication by itself
 
 Optional flags:
 - `--reprocess`
@@ -143,6 +160,18 @@ lunduke-transcripts render \
 - `pandoc_binary`
 - `pdf_engine` (`chromium`)
 - `pdf_engine_binary`
+
+`[llm]` also supports optional task routing through `lee-llm-router`:
+- `router_enabled`
+- `router_repo_path`
+- `router_config_path`
+- `router_trace_dir`
+- `[llm.router_roles]`
+
+Typical selective routing:
+- keep `provider/model` on a cheaper API model for extraction and planning
+- route `tutorial.writer`, `tutorial.technical-review`, and
+  `tutorial.adversarial-review` to ChatGPT subscription-backed `gpt-5.4`
 
 ## Outputs
 
@@ -218,7 +247,13 @@ black src tests
 - `yt-dlp not found`: set `[app].yt_dlp_binary` in config or install in active environment.
 - `yt-dlp` hangs/slow responses:
   - tune `[app].yt_dlp_timeout_seconds`
+- `tutorial` appears stalled after `tutorial_draft.md` is written:
+  - inspect `tutorial_validation_report.json`, `technical_review_report.json`, and `adversarial_review_report.json`
+  - confirm the configured LLM provider is responsive and that `LLM_TIMEOUT_SECONDS` is set as expected
   - tune `[app].fetch_retries` and `[app].retry_backoff_seconds`
+- `tutorial_final.pdf` did not refresh after a rerun:
+  - check `tutorial_manifest.json`
+  - if `status = "blocked"`, the pipeline intentionally leaves the previous published Markdown/PDF in place until the tutorial clears review
 - No transcript files produced: video may not expose captions; check run report status.
 - Local file transcript missing: add a sidecar `.vtt`/`.srt` next to the media file or enable ASR fallback.
 - Frame capture failed:

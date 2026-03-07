@@ -17,6 +17,55 @@ Assumptions:
 
 ---
 
+## Sprint 10 — Tutorial Quality Refinement
+
+**Status**: ⏳ In Progress (2026-03-07)  
+**Goal**: Improve public tutorial quality so outputs read like real tutorials instead of transcript-shaped artifacts, while routing the expensive tutorial stages through a stronger model and keeping the real screencast loop reliable.
+
+### Scope
+
+- [x] Add tutorial-specific skills for:
+  - narrative structure
+  - public-artifact hygiene
+  - tutorial navigation
+  - tutorial step selection
+  - tutorial-quality review
+- [x] Update writer/planner/reviewer agents to use the new tutorial skills
+- [x] Make adversarial review advisory-only rather than a publish veto
+- [x] Require public tutorial structure in final Markdown:
+  - context section
+  - table of contents
+  - back-to-top navigation
+  - no leaked `Evidence:` callouts
+- [x] Route tutorial writing/review/red-team stages through `lee-llm-router` and ChatGPT Plus `gpt-5.4`
+- [x] Fix the ChatGPT subscription provider so the real screencast tutorial flow no longer hangs in the review loop
+- [x] Add validator/test coverage for:
+  - evidence leakage
+  - missing navigation
+  - definition-controlled structural requirements
+  - per-section back-to-top validation
+- [x] Run formal code review and remediate findings
+- [x] Fix the live LLM review-stage stall exposed by real screencast reruns
+- [ ] Retune planning/writing so incidental environment setup does not dominate the tutorial flow
+- [ ] Decide whether blocked tutorial runs should still render a draft PDF for human review
+
+### Delivery Notes
+
+- The public Markdown contract is now stricter: internal grounding artifacts stay in JSON sidecars, not the final tutorial.
+- The draft for `AgentFlowComplete_compressed.mp4` now includes context, a table of contents, and back-to-top navigation, and no longer leaks evidence blocks.
+- Expensive tutorial stages now run through `lee-llm-router`, with cheap planning/evidence stages staying on cheaper OpenRouter roles and writer/reviewer/red-team using ChatGPT Plus `gpt-5.4`.
+- Test As Lee now completes the full screencast review loop cleanly. The current `AgentFlowComplete_compressed.mp4` rerun ends as `blocked` because the tutorial still fails validation/review, not because the runtime hangs.
+- Because the screencast rerun blocked, `tutorial_final.md` / `tutorial_final.pdf` were not republished; the latest fresh artifact from this run is `tutorial_draft.md`.
+
+### Acceptance Criteria
+
+1. Published tutorials read like public tutorials rather than organized transcript notes.
+2. Final Markdown never leaks `Evidence:` blocks or internal review language.
+3. Navigation requirements are enforced consistently and can be relaxed only through the tutorial definition flags.
+4. Real screencast reruns complete the full draft → review loop without hanging, even when the result is `blocked`.
+
+---
+
 ## Sprint 9 — Tutorial PDF Rendering
 
 **Status**: ✅ Completed (2026-03-06)  

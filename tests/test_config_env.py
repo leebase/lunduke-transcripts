@@ -34,6 +34,13 @@ frame_image_format = "png"
 [llm]
 provider = "openai"
 model = "gpt-4.1-mini"
+router_enabled = true
+router_repo_path = "/Users/leeharrington/projects/lee-llm-router"
+router_config_path = "config/tutorial-llm-router.yaml"
+
+[llm.router_roles]
+"tutorial.writer" = "tutorial_writer"
+"tutorial.technical-review" = "tutorial_reviewer"
 
 [[channels]]
 name = "Example"
@@ -63,6 +70,10 @@ clip_end = "00:00:30"
     config = load_config(config_file)
     assert config.llm.provider == "openrouter"
     assert config.llm.model == "openai/gpt-4.1-mini"
+    assert config.llm.router_enabled is True
+    assert config.llm.router_repo_path == "/Users/leeharrington/projects/lee-llm-router"
+    assert config.llm.router_config_path == "config/tutorial-llm-router.yaml"
+    assert config.llm.router_roles["tutorial.writer"] == "tutorial_writer"
     assert config.app.enable_article is True
     assert config.app.enable_asr_fallback is True
     assert config.app.asr_provider == "fast-whisper"

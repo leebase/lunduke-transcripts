@@ -1,0 +1,64 @@
+llm:
+  default_role: tutorial_writer
+
+  providers:
+    openrouter:
+      type: openrouter_http
+      base_url: https://openrouter.ai/api/v1
+      api_key_env: OPENROUTER_API_KEY
+
+    codex_subscription:
+      type: openai_codex_subscription_http
+      base_url: https://chatgpt.com/backend-api/codex
+      # If you already use `codex login`, no extra env var is required.
+      # Optional CI override:
+      # access_token_env: OPENAI_CODEX_ACCESS_TOKEN
+
+  roles:
+    tutorial_educator:
+      provider: openrouter
+      model: openai/gpt-4.1-mini
+      temperature: 0.2
+      json_mode: true
+      timeout: 60.0
+
+    tutorial_planner:
+      provider: openrouter
+      model: openai/gpt-4.1-mini
+      temperature: 0.2
+      json_mode: true
+      timeout: 60.0
+
+    tutorial_evidence:
+      provider: openrouter
+      model: openai/gpt-4.1-mini
+      temperature: 0.1
+      json_mode: true
+      timeout: 60.0
+
+    tutorial_visual:
+      provider: openrouter
+      model: openai/gpt-4.1-mini
+      temperature: 0.1
+      json_mode: true
+      timeout: 60.0
+
+    tutorial_writer:
+      provider: codex_subscription
+      model: gpt-5.4
+      temperature: 0.4
+      timeout: 120.0
+
+    tutorial_reviewer:
+      provider: codex_subscription
+      model: gpt-5.4
+      temperature: 0.2
+      json_mode: true
+      timeout: 120.0
+
+    tutorial_redteam:
+      provider: codex_subscription
+      model: gpt-5.4
+      temperature: 0.3
+      json_mode: true
+      timeout: 120.0
