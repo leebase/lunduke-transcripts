@@ -32,11 +32,12 @@
 ### Current Work Stream
 Sprint 10 is closed. The tutorial pipeline now uses advisory co-editors instead
 of tutorial-quality hard gates, publishes a fresh latest artifact after outline
-approval, auto-renders fresh HTML/PDF artifacts when a run reaches
-`published`, and routes only the heavier editorial stages through ChatGPT Plus
-by default. Sprint 11 is focused on making the tutorial itself read like a
-stronger piece of ghostwritten instructional writing while tightening public
-artifact polish.
+approval, auto-renders fresh HTML/PDF artifacts by default when a run reaches
+`published`, and still supports explicit Markdown-only publishes via
+`--skip-render`. Render failures now report a partial overall CLI result while
+keeping the tutorial's published status explicit in the payload. Sprint 11 is
+focused on making the tutorial itself read like a stronger piece of
+ghostwritten instructional writing while tightening public artifact polish.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -97,6 +98,8 @@ artifact polish.
 - ✅ Test As Lee regenerated the live screencast draft and confirmed the fresh public Markdown now uses `Codex` consistently with no terminology validation findings
 - ✅ Fixed the stale-final-artifact gap by making published `tutorial` CLI runs auto-invoke downstream HTML/PDF rendering
 - ✅ Added tutorial CLI regression coverage for auto-render success and render-failure exit behavior
+- ✅ Added `--skip-render` so Markdown-only publishes do not depend on the renderer toolchain
+- ✅ Changed tutorial CLI payload/status semantics so render failures report `status = "partial"` while preserving `tutorial_status = "published"`
 - ✅ Re-ran the real screencast `render` CLI and refreshed `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json`
 
 ### In Progress
@@ -133,7 +136,7 @@ artifact polish.
 | Repo-root fallback is allowed for `config/...` router assets | Real configs commonly point at repo-root config files even when the main TOML file lives under `config/` | 2026-03-07 |
 | Editorial warnings no longer suppress fresh final artifacts | The latest approved tutorial should always be inspectable and renderable, even when reviewers still have objections | 2026-03-07 |
 | Public tutorial drafts get deterministic copy-edits for known tool-name confusions before validation | Reader-facing output should not leak obvious ASR homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
-| Published tutorial CLI runs auto-trigger downstream PDF rendering | A fresh approved tutorial should not leave a stale older PDF pretending to be the latest final artifact | 2026-03-07 |
+| Published tutorial CLI runs auto-trigger downstream PDF rendering by default, but Markdown-only publishes remain available | A fresh approved tutorial should not leave a stale older PDF pretending to be the latest final artifact, but the renderer must not become mandatory for every publish workflow | 2026-03-07 |
 
 ---
 

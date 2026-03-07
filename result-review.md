@@ -16,17 +16,18 @@ stopping at fresh Markdown and leaving an older PDF on disk.
 
 | Area | What Was Delivered |
 |------|--------------------|
-| CLI publish flow | `lunduke-transcripts tutorial --approve-outline` now calls the downstream PDF renderer whenever the tutorial run finishes with `status = "published"` |
-| Failure visibility | The tutorial CLI JSON output now includes render status/paths and returns a non-zero exit code if the downstream render fails |
-| Regression coverage | Added CLI tests covering published-tutorial auto-render success and published-tutorial render failure handling |
+| CLI publish flow | `lunduke-transcripts tutorial --approve-outline` now calls the downstream PDF renderer by default whenever the tutorial run finishes with `status = "published"` |
+| Markdown-only escape hatch | Added `--skip-render` so a user can still publish only `tutorial_final.md` without depending on Pandoc/Chrome |
+| Failure visibility | The tutorial CLI JSON output now distinguishes `status`, `tutorial_status`, and `render_status`, and reports `status = "partial"` with a non-zero exit code if the downstream render fails after publish |
+| Regression coverage | Added CLI tests covering published-tutorial auto-render success, `--skip-render`, and published-tutorial render failure handling |
 | Live validation | Re-ran the real `render` CLI for `AgentFlowComplete_compressed.mp4` and refreshed `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json` with March 7, 2026 timestamps |
 
 ### Why It Matters
 
 - Prevents a fresh `tutorial_final.md` from masquerading as a fully refreshed
   final artifact when the PDF on disk is still from an older run.
-- Keeps rendering downstream and independently rerunnable while making the
-  default publish path safer for real users.
+- Keeps rendering downstream and independently rerunnable while preserving a
+  clean Markdown-only path for users who explicitly do not want to render.
 
 ### How to Verify
 
@@ -34,13 +35,15 @@ stopping at fresh Markdown and leaving an older PDF on disk.
    - `./.venv/bin/pytest -q tests/test_main_cli.py tests/test_tutorial_render_pipeline.py`
    - `./.venv/bin/ruff check src/lunduke_transcripts/main.py tests/test_main_cli.py`
    - `./.venv/bin/black --check src/lunduke_transcripts/main.py tests/test_main_cli.py`
-2. Verify the real renderer path refreshes the screencast final artifacts:
+2. Verify the Markdown-only publish path remains available:
+   - `./.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --skip-render --config config/channels.toml --env-file .env`
+3. Verify the real renderer path refreshes the screencast final artifacts:
    - `./.venv/bin/python -m lunduke_transcripts.main render --manifest data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_manifest.json --target pdf --config config/channels.toml --env-file .env`
-3. Confirm fresh timestamps on:
+4. Confirm fresh timestamps on:
    - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.html`
    - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.pdf`
    - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/render_manifest.json`
-4. Note the remaining separate gap:
+5. Note the remaining separate gap:
    - some live router-backed `tutorial` CLI runs can still linger after artifact refresh, so the PDF handoff fix does not by itself close the lingering-process bug
 
 ---

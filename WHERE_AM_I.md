@@ -11,7 +11,7 @@
 | **Project** | lunduke-transcripts |
 | **Profile** | Python Package |
 | **Current Phase** | Phase 6 — Tutorial Quality Closeout / Pedagogy Next |
-| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, automatic publish-to-PDF handoff, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality and live-run polish are now the main remaining product frontiers rather than pipeline blocking semantics |
+| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, default publish-to-PDF handoff with an explicit Markdown-only escape hatch, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality and live-run polish are now the main remaining product frontiers rather than pipeline blocking semantics |
 | **Last Updated** | 2026-03-07 |
 
 ---
@@ -103,7 +103,7 @@
 | Router paths are resolved relative to the chosen config file | Running the CLI from another working directory must not break router configs or traces | 2026-03-07 |
 | Fresh final artifacts are written even when editorial warnings remain | Human review should see the newest Markdown/PDF rather than stale successful artifacts | 2026-03-07 |
 | Public tutorial drafts receive deterministic copy-edits for known tool-name confusions | Reader-facing artifacts should not leak obvious transcript homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
-| Published tutorial runs auto-trigger downstream render refresh | A fresh approved tutorial should refresh HTML/PDF artifacts in the same user flow instead of leaving stale finals on disk | 2026-03-07 |
+| Published tutorial runs auto-trigger downstream render refresh by default, with `--skip-render` for Markdown-only publishes | A fresh approved tutorial should refresh HTML/PDF artifacts in the same user flow instead of leaving stale finals on disk, without making the renderer mandatory for every publish workflow | 2026-03-07 |
 
 ---
 

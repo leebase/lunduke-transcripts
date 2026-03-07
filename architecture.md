@@ -163,10 +163,11 @@ instead of acting as a generic spellchecker.
 
 ## 2026-03-07 — Published tutorial runs automatically invoke downstream PDF rendering
 
-**Decision:** When the `tutorial` CLI reaches `published`, it immediately calls
-the downstream render pipeline for the fresh `tutorial_manifest.json` so the
-latest approved tutorial refreshes `tutorial_final.html`,
+**Decision:** When the `tutorial` CLI reaches `published`, it calls the
+downstream render pipeline by default for the fresh `tutorial_manifest.json` so
+the latest approved tutorial refreshes `tutorial_final.html`,
 `tutorial_final.pdf`, and `render_manifest.json` in the same user flow.
+Markdown-only users can opt out with `--skip-render`.
 
 **Rationale:** Leaving rendering as a purely manual second command made it easy
 for a newly published `tutorial_final.md` to coexist with a stale older PDF,
@@ -181,6 +182,8 @@ Moving PDF creation directly into the tutorial pipeline itself would blur the
 boundary between content generation and formatting.
 
 **Consequences:** A successful published tutorial run now also produces fresh
-render artifacts when the process exits normally, and the CLI returns a failing
-exit code if the downstream render fails. The standalone `render` command
+render artifacts when the process exits normally, but Markdown-only workflows
+can still stop at `tutorial_final.md` with `--skip-render`. If publish succeeds
+and render fails, the command reports a partial overall result while preserving
+the published tutorial status in the payload. The standalone `render` command
 remains available for rerender-only workflows and layout iteration.

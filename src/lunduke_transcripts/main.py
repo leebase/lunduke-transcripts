@@ -172,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(_repo_root() / "skills"),
         help="Directory containing tutorial skill files",
     )
+    tutorial_parser.add_argument(
+        "--skip-render",
+        action="store_true",
+        help="Publish Markdown only and skip the automatic downstream HTML/PDF render",
+    )
 
     render_parser = subparsers.add_parser(
         "render",
@@ -500,13 +505,20 @@ def tutorial_command(args: argparse.Namespace) -> int:
             reprocess=bool(args.reprocess),
             max_review_cycles=max(int(args.max_review_cycles), 0),
         )
-        if summary.status == "published":
+        render_attempted = summary.status == "published" and not bool(args.skip_render)
+        if render_attempted:
             render_summary = _build_render_pipeline(config=config).run(
                 manifest_path=summary.manifest_path,
                 target="pdf",
             )
+        overall_status = _tutorial_command_status(
+            tutorial_status=summary.status,
+            render_summary=render_summary,
+            render_skipped=bool(args.skip_render),
+        )
         payload = {
-            "status": summary.status,
+            "status": overall_status,
+            "tutorial_status": summary.status,
             "tutorial_dir": str(summary.tutorial_dir),
             "manifest_path": str(summary.manifest_path),
             "human_outline_approved": summary.human_outline_approved,
@@ -514,7 +526,12 @@ def tutorial_command(args: argparse.Namespace) -> int:
             "reused_cached_outputs": summary.reused_cached_outputs,
             "review_cycles": summary.review_cycles,
             "failures": summary.failures,
-            "render_status": render_summary.status if render_summary else None,
+            "render_attempted": render_attempted,
+            "render_status": _tutorial_render_status(
+                tutorial_status=summary.status,
+                render_summary=render_summary,
+                render_skipped=bool(args.skip_render),
+            ),
             "render_manifest_path": (
                 str(render_summary.render_manifest_path) if render_summary else None
             ),
@@ -526,7 +543,7 @@ def tutorial_command(args: argparse.Namespace) -> int:
             "render_failures": render_summary.failures if render_summary else [],
         }
         print(json.dumps(payload, indent=2))
-        return 0 if render_summary is None or render_summary.status == "success" else 1
+        return 1 if overall_status == "partial" else 0
     except Exception as exc:  # noqa: BLE001
         print(
             json.dumps(
@@ -576,6 +593,36 @@ def _build_render_pipeline(*, config: Config) -> TutorialRenderPipeline:
         pdf_engine_binary=config.app.pdf_engine_binary,
         renderer_dir=_repo_root() / "renderers",
     )
+
+
+def _tutorial_command_status(
+    *,
+    tutorial_status: str,
+    render_summary: RenderSummary | None,
+    render_skipped: bool,
+) -> str:
+    if tutorial_status != "published":
+        return tutorial_status
+    if render_summary is None:
+        return "published"
+    if render_summary.status == "success":
+        return "published"
+    if render_skipped:
+        return "published"
+    return "partial"
+
+
+def _tutorial_render_status(
+    *,
+    tutorial_status: str,
+    render_summary: RenderSummary | None,
+    render_skipped: bool,
+) -> str | None:
+    if render_summary is not None:
+        return render_summary.status
+    if tutorial_status == "published" and render_skipped:
+        return "skipped"
+    return None
 
 
 def _repo_root() -> Path:

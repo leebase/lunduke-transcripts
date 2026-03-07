@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -184,12 +185,15 @@ def test_tutorial_command_uses_bundle_without_config(monkeypatch, tmp_path) -> N
         max_review_cycles=1,
         agents_dir=str(tmp_path / "agents"),
         skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
     )
 
     assert main_mod.tutorial_command(args) == 0
 
 
-def test_tutorial_command_renders_pdf_after_publish(monkeypatch, tmp_path) -> None:
+def test_tutorial_command_renders_pdf_after_publish(
+    monkeypatch, tmp_path, capsys
+) -> None:
     captured: dict[str, object] = {}
 
     class _FakeLLM:
@@ -260,9 +264,14 @@ def test_tutorial_command_renders_pdf_after_publish(monkeypatch, tmp_path) -> No
         max_review_cycles=1,
         agents_dir=str(tmp_path / "agents"),
         skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
     )
 
     assert main_mod.tutorial_command(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "published"
+    assert payload["tutorial_status"] == "published"
+    assert payload["render_status"] == "success"
     assert captured["render_run"] == {
         "manifest_path": tmp_path / "tutorial" / "tutorial_manifest.json",
         "target": "pdf",
@@ -270,7 +279,7 @@ def test_tutorial_command_renders_pdf_after_publish(monkeypatch, tmp_path) -> No
 
 
 def test_tutorial_command_fails_when_publish_render_fails(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ) -> None:
     class _FakeLLM:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003
@@ -337,9 +346,76 @@ def test_tutorial_command_fails_when_publish_render_fails(
         max_review_cycles=1,
         agents_dir=str(tmp_path / "agents"),
         skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
     )
 
     assert main_mod.tutorial_command(args) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "partial"
+    assert payload["tutorial_status"] == "published"
+    assert payload["render_status"] == "failed"
+    assert payload["render_failures"] == ["required_binary_missing: pandoc"]
+
+
+def test_tutorial_command_can_skip_auto_render(monkeypatch, tmp_path, capsys) -> None:
+    class _FakeLLM:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeRegistry:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeTutorialPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            _ = kwargs
+            from lunduke_transcripts.domain.models import TutorialSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            manifest_path = tutorial_dir / "tutorial_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            return TutorialSummary(
+                status="published",
+                tutorial_dir=tutorial_dir,
+                manifest_path=manifest_path,
+                human_outline_approved=True,
+                publish_eligible=True,
+            )
+
+    class _UnexpectedRenderPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("render pipeline should not be constructed")
+
+    monkeypatch.setattr(main_mod, "LLMAdapter", _FakeLLM)
+    monkeypatch.setattr(main_mod, "TutorialAgentRegistry", _FakeRegistry)
+    monkeypatch.setattr(main_mod, "TutorialPipeline", _FakeTutorialPipeline)
+    monkeypatch.setattr(main_mod, "TutorialRenderPipeline", _UnexpectedRenderPipeline)
+
+    bundle_path = tmp_path / "tutorial_asset_bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+    args = Namespace(
+        command="tutorial",
+        bundle=str(bundle_path),
+        config=str(tmp_path / "missing.toml"),
+        env_file=str(tmp_path / "missing.env"),
+        approve_outline=True,
+        reprocess=False,
+        max_review_cycles=1,
+        agents_dir=str(tmp_path / "agents"),
+        skills_dir=str(tmp_path / "skills"),
+        skip_render=True,
+    )
+
+    assert main_mod.tutorial_command(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "published"
+    assert payload["tutorial_status"] == "published"
+    assert payload["render_status"] == "skipped"
+    assert payload["render_attempted"] is False
 
 
 def test_tutorial_command_resolves_router_paths_relative_to_config(
@@ -410,6 +486,7 @@ router_trace_dir = "../traces"
         max_review_cycles=1,
         agents_dir=str(tmp_path / "agents"),
         skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
     )
 
     assert main_mod.tutorial_command(args) == 0
@@ -471,6 +548,7 @@ def test_tutorial_command_reports_runtime_failure(monkeypatch, tmp_path) -> None
         max_review_cycles=1,
         agents_dir=str(tmp_path / "agents"),
         skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
     )
 
     assert main_mod.tutorial_command(args) == 1

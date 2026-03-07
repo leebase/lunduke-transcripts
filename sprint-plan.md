@@ -100,8 +100,9 @@ Assumptions:
   obvious tool-name confusions before validation runs.
 - Regression coverage now checks that a draft containing `GPT 5.3 codecs` or
   similar public-facing wording is normalized to `Codex` in the final Markdown.
-- Published tutorial runs now auto-trigger the downstream render step so a
-  fresh `tutorial_final.md` no longer leaves a stale older PDF on disk.
+- Published tutorial runs now auto-trigger the downstream render step by
+  default so a fresh `tutorial_final.md` no longer leaves a stale older PDF on
+  disk, while `--skip-render` preserves the explicit Markdown-only workflow.
 - A fresh live screencast draft confirmed the `Codex` spelling fix, but some
   router-backed `tutorial` CLI runs still linger after draft refresh and need a
   separate reliability pass.
