@@ -189,6 +189,159 @@ def test_tutorial_command_uses_bundle_without_config(monkeypatch, tmp_path) -> N
     assert main_mod.tutorial_command(args) == 0
 
 
+def test_tutorial_command_renders_pdf_after_publish(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeLLM:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeRegistry:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeTutorialPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            _ = kwargs
+            from lunduke_transcripts.domain.models import TutorialSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            manifest_path = tutorial_dir / "tutorial_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            return TutorialSummary(
+                status="published",
+                tutorial_dir=tutorial_dir,
+                manifest_path=manifest_path,
+                human_outline_approved=True,
+                publish_eligible=True,
+            )
+
+    class _FakeRenderPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["render_init"] = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            captured["render_run"] = kwargs
+            from lunduke_transcripts.domain.models import RenderSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            render_manifest_path = tutorial_dir / "render_manifest.json"
+            render_manifest_path.write_text("{}", encoding="utf-8")
+            output_path = tutorial_dir / "tutorial_final.pdf"
+            output_path.write_text("pdf", encoding="utf-8")
+            return RenderSummary(
+                status="success",
+                tutorial_dir=tutorial_dir,
+                render_manifest_path=render_manifest_path,
+                target="pdf",
+                html_path=tutorial_dir / "tutorial_final.html",
+                output_path=output_path,
+            )
+
+    monkeypatch.setattr(main_mod, "LLMAdapter", _FakeLLM)
+    monkeypatch.setattr(main_mod, "TutorialAgentRegistry", _FakeRegistry)
+    monkeypatch.setattr(main_mod, "TutorialPipeline", _FakeTutorialPipeline)
+    monkeypatch.setattr(main_mod, "TutorialRenderPipeline", _FakeRenderPipeline)
+
+    bundle_path = tmp_path / "tutorial_asset_bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+    args = Namespace(
+        command="tutorial",
+        bundle=str(bundle_path),
+        config=str(tmp_path / "missing.toml"),
+        env_file=str(tmp_path / "missing.env"),
+        approve_outline=True,
+        reprocess=False,
+        max_review_cycles=1,
+        agents_dir=str(tmp_path / "agents"),
+        skills_dir=str(tmp_path / "skills"),
+    )
+
+    assert main_mod.tutorial_command(args) == 0
+    assert captured["render_run"] == {
+        "manifest_path": tmp_path / "tutorial" / "tutorial_manifest.json",
+        "target": "pdf",
+    }
+
+
+def test_tutorial_command_fails_when_publish_render_fails(
+    monkeypatch, tmp_path
+) -> None:
+    class _FakeLLM:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeRegistry:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeTutorialPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            _ = kwargs
+            from lunduke_transcripts.domain.models import TutorialSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            manifest_path = tutorial_dir / "tutorial_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            return TutorialSummary(
+                status="published",
+                tutorial_dir=tutorial_dir,
+                manifest_path=manifest_path,
+                human_outline_approved=True,
+                publish_eligible=True,
+            )
+
+    class _FailingRenderPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            _ = kwargs
+            from lunduke_transcripts.domain.models import RenderSummary
+
+            tutorial_dir = tmp_path / "tutorial"
+            tutorial_dir.mkdir(exist_ok=True)
+            render_manifest_path = tutorial_dir / "render_manifest.json"
+            render_manifest_path.write_text("{}", encoding="utf-8")
+            return RenderSummary(
+                status="failed",
+                tutorial_dir=tutorial_dir,
+                render_manifest_path=render_manifest_path,
+                target="pdf",
+                failures=["required_binary_missing: pandoc"],
+            )
+
+    monkeypatch.setattr(main_mod, "LLMAdapter", _FakeLLM)
+    monkeypatch.setattr(main_mod, "TutorialAgentRegistry", _FakeRegistry)
+    monkeypatch.setattr(main_mod, "TutorialPipeline", _FakeTutorialPipeline)
+    monkeypatch.setattr(main_mod, "TutorialRenderPipeline", _FailingRenderPipeline)
+
+    bundle_path = tmp_path / "tutorial_asset_bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+    args = Namespace(
+        command="tutorial",
+        bundle=str(bundle_path),
+        config=str(tmp_path / "missing.toml"),
+        env_file=str(tmp_path / "missing.env"),
+        approve_outline=True,
+        reprocess=False,
+        max_review_cycles=1,
+        agents_dir=str(tmp_path / "agents"),
+        skills_dir=str(tmp_path / "skills"),
+    )
+
+    assert main_mod.tutorial_command(args) == 1
+
+
 def test_tutorial_command_resolves_router_paths_relative_to_config(
     monkeypatch, tmp_path
 ) -> None:

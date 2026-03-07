@@ -32,8 +32,9 @@
 ### Current Work Stream
 Sprint 10 is closed. The tutorial pipeline now uses advisory co-editors instead
 of tutorial-quality hard gates, publishes a fresh latest artifact after outline
-approval, and routes only the heavier editorial stages through ChatGPT Plus by
-default. Sprint 11 is focused on making the tutorial itself read like a
+approval, auto-renders fresh HTML/PDF artifacts when a run reaches
+`published`, and routes only the heavier editorial stages through ChatGPT Plus
+by default. Sprint 11 is focused on making the tutorial itself read like a
 stronger piece of ghostwritten instructional writing while tightening public
 artifact polish.
 
@@ -94,11 +95,14 @@ artifact polish.
 - ✅ Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF under the advisory co-editor model
 - ✅ Added a deterministic public copy-edit pass plus regression coverage for obvious `Codex`/`codecs` name confusion
 - ✅ Test As Lee regenerated the live screencast draft and confirmed the fresh public Markdown now uses `Codex` consistently with no terminology validation findings
+- ✅ Fixed the stale-final-artifact gap by making published `tutorial` CLI runs auto-invoke downstream HTML/PDF rendering
+- ✅ Added tutorial CLI regression coverage for auto-render success and render-failure exit behavior
+- ✅ Re-ran the real screencast `render` CLI and refreshed `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json`
 
 ### In Progress
 - ⏳ Sprint 11 planning: tutorial pedagogy, ghostwriting quality, and step selection
 - ⏳ Evaluating how much stronger the writer/planner prompts should get before adding a source-interpretation stage
-- ⏳ Investigating why some router-backed live `tutorial` CLI runs linger in an SSL read after the draft artifacts are already refreshed
+- ⏳ Investigating why some router-backed live `tutorial` CLI runs still linger after artifact refresh, including cached publish paths that should now only need the render handoff
 
 ---
 
@@ -129,6 +133,7 @@ artifact polish.
 | Repo-root fallback is allowed for `config/...` router assets | Real configs commonly point at repo-root config files even when the main TOML file lives under `config/` | 2026-03-07 |
 | Editorial warnings no longer suppress fresh final artifacts | The latest approved tutorial should always be inspectable and renderable, even when reviewers still have objections | 2026-03-07 |
 | Public tutorial drafts get deterministic copy-edits for known tool-name confusions before validation | Reader-facing output should not leak obvious ASR homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
+| Published tutorial CLI runs auto-trigger downstream PDF rendering | A fresh approved tutorial should not leave a stale older PDF pretending to be the latest final artifact | 2026-03-07 |
 
 ---
 

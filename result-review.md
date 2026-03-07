@@ -6,6 +6,45 @@
 
 ---
 
+## 2026-03-07 — Published Tutorial Runs Now Refresh Final PDF Artifacts
+
+Fixed the stale-final-artifact gap by making the `tutorial` CLI invoke the
+downstream renderer automatically after a successful publish, instead of
+stopping at fresh Markdown and leaving an older PDF on disk.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| CLI publish flow | `lunduke-transcripts tutorial --approve-outline` now calls the downstream PDF renderer whenever the tutorial run finishes with `status = "published"` |
+| Failure visibility | The tutorial CLI JSON output now includes render status/paths and returns a non-zero exit code if the downstream render fails |
+| Regression coverage | Added CLI tests covering published-tutorial auto-render success and published-tutorial render failure handling |
+| Live validation | Re-ran the real `render` CLI for `AgentFlowComplete_compressed.mp4` and refreshed `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json` with March 7, 2026 timestamps |
+
+### Why It Matters
+
+- Prevents a fresh `tutorial_final.md` from masquerading as a fully refreshed
+  final artifact when the PDF on disk is still from an older run.
+- Keeps rendering downstream and independently rerunnable while making the
+  default publish path safer for real users.
+
+### How to Verify
+
+1. Run targeted checks:
+   - `./.venv/bin/pytest -q tests/test_main_cli.py tests/test_tutorial_render_pipeline.py`
+   - `./.venv/bin/ruff check src/lunduke_transcripts/main.py tests/test_main_cli.py`
+   - `./.venv/bin/black --check src/lunduke_transcripts/main.py tests/test_main_cli.py`
+2. Verify the real renderer path refreshes the screencast final artifacts:
+   - `./.venv/bin/python -m lunduke_transcripts.main render --manifest data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_manifest.json --target pdf --config config/channels.toml --env-file .env`
+3. Confirm fresh timestamps on:
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.html`
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.pdf`
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/render_manifest.json`
+4. Note the remaining separate gap:
+   - some live router-backed `tutorial` CLI runs can still linger after artifact refresh, so the PDF handoff fix does not by itself close the lingering-process bug
+
+---
+
 ## 2026-03-07 — Codex Terminology Guard Added to Public Tutorial Output
 
 Added a narrow public-facing copy-edit and validation backstop so tutorial

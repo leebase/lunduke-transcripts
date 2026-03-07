@@ -24,7 +24,7 @@ from lunduke_transcripts.config import (
     load_config,
     load_env_file,
 )
-from lunduke_transcripts.domain.models import RunOptions
+from lunduke_transcripts.domain.models import RenderSummary, RunOptions
 from lunduke_transcripts.infra.asr_plugins.registry import build_asr_plugin
 from lunduke_transcripts.infra.llm_adapter import LLMAdapter
 from lunduke_transcripts.infra.local_media_adapter import LocalMediaAdapter
@@ -492,6 +492,7 @@ def tutorial_command(args: argparse.Namespace) -> int:
             skills_dir=Path(args.skills_dir).expanduser().resolve(),
         ),
     )
+    render_summary: RenderSummary | None = None
     try:
         summary = pipeline.run(
             bundle_path=Path(args.bundle),
@@ -499,6 +500,11 @@ def tutorial_command(args: argparse.Namespace) -> int:
             reprocess=bool(args.reprocess),
             max_review_cycles=max(int(args.max_review_cycles), 0),
         )
+        if summary.status == "published":
+            render_summary = _build_render_pipeline(config=config).run(
+                manifest_path=summary.manifest_path,
+                target="pdf",
+            )
         payload = {
             "status": summary.status,
             "tutorial_dir": str(summary.tutorial_dir),
@@ -508,9 +514,19 @@ def tutorial_command(args: argparse.Namespace) -> int:
             "reused_cached_outputs": summary.reused_cached_outputs,
             "review_cycles": summary.review_cycles,
             "failures": summary.failures,
+            "render_status": render_summary.status if render_summary else None,
+            "render_manifest_path": (
+                str(render_summary.render_manifest_path) if render_summary else None
+            ),
+            "render_output_path": (
+                str(render_summary.output_path)
+                if render_summary and render_summary.output_path
+                else None
+            ),
+            "render_failures": render_summary.failures if render_summary else [],
         }
         print(json.dumps(payload, indent=2))
-        return 0
+        return 0 if render_summary is None or render_summary.status == "success" else 1
     except Exception as exc:  # noqa: BLE001
         print(
             json.dumps(
@@ -535,12 +551,7 @@ def render_command(args: argparse.Namespace) -> int:
     else:
         config = default_config_from_env()
 
-    pipeline = TutorialRenderPipeline(
-        pandoc_binary=config.app.pandoc_binary,
-        pdf_engine=config.app.pdf_engine,
-        pdf_engine_binary=config.app.pdf_engine_binary,
-        renderer_dir=_repo_root() / "renderers",
-    )
+    pipeline = _build_render_pipeline(config=config)
     summary = pipeline.run(
         manifest_path=Path(args.manifest),
         target=str(args.target),
@@ -556,6 +567,15 @@ def render_command(args: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, indent=2))
     return 0 if summary.status == "success" else 1
+
+
+def _build_render_pipeline(*, config: Config) -> TutorialRenderPipeline:
+    return TutorialRenderPipeline(
+        pandoc_binary=config.app.pandoc_binary,
+        pdf_engine=config.app.pdf_engine,
+        pdf_engine_binary=config.app.pdf_engine_binary,
+        renderer_dir=_repo_root() / "renderers",
+    )
 
 
 def _repo_root() -> Path:

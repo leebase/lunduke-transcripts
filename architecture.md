@@ -160,3 +160,27 @@ artifact got repaired.
 the validator remains as a backstop if suspicious terminology survives. This is
 intentionally narrow: it targets known high-signal product-name confusions
 instead of acting as a generic spellchecker.
+
+## 2026-03-07 — Published tutorial runs automatically invoke downstream PDF rendering
+
+**Decision:** When the `tutorial` CLI reaches `published`, it immediately calls
+the downstream render pipeline for the fresh `tutorial_manifest.json` so the
+latest approved tutorial refreshes `tutorial_final.html`,
+`tutorial_final.pdf`, and `render_manifest.json` in the same user flow.
+
+**Rationale:** Leaving rendering as a purely manual second command made it easy
+for a newly published `tutorial_final.md` to coexist with a stale older PDF,
+which is misleading in the live screencast workflow. Automatic handoff keeps
+rendering downstream and separable in code while ensuring the default publish
+path refreshes the reader-facing final artifact.
+
+**Alternatives rejected:** Keeping rendering manual preserved a cleaner command
+separation, but it left stale PDFs on disk after successful tutorial runs and
+created confusion about whether the final artifact had actually been refreshed.
+Moving PDF creation directly into the tutorial pipeline itself would blur the
+boundary between content generation and formatting.
+
+**Consequences:** A successful published tutorial run now also produces fresh
+render artifacts when the process exits normally, and the CLI returns a failing
+exit code if the downstream render fails. The standalone `render` command
+remains available for rerender-only workflows and layout iteration.

@@ -11,7 +11,7 @@
 | **Project** | lunduke-transcripts |
 | **Profile** | Python Package |
 | **Current Phase** | Phase 6 — Tutorial Quality Closeout / Pedagogy Next |
-| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality and live-run polish are now the main remaining product frontiers rather than pipeline blocking semantics |
+| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, automatic publish-to-PDF handoff, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality and live-run polish are now the main remaining product frontiers rather than pipeline blocking semantics |
 | **Last Updated** | 2026-03-07 |
 
 ---
@@ -42,7 +42,7 @@
 | Ship downstream multi-agent written tutorial generation | ✅ Done | `tutorial` CLI, approval gate, validation, review, revision, and final Markdown output are implemented |
 | Ship downstream tutorial rendering | ✅ Done | `render` CLI, image validation, HTML staging, PDF output, and render manifests are implemented |
 | Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, advisory co-editor semantics, and a `Codex` terminology copy-edit pass are in; the remaining gap is the quality of the tutorial prose and step selection |
-| Make real screencast tutorial reruns finish reliably | ✅ Done | `tutorial --approve-outline --reprocess` now completes cleanly on the real screencast and republishes fresh Markdown/PDF instead of leaving stale finals in place |
+| Make real screencast tutorial reruns finish reliably | 🟡 In progress | Published tutorial runs now auto-render fresh HTML/PDF instead of leaving stale finals behind, but some live router-backed `tutorial` CLI runs still linger after artifact refresh |
 | Route expensive tutorial stages through ChatGPT Plus `gpt-5.4` | ✅ Done | `lee-llm-router` now handles tutorial writing + technical review while cheap stages stay on cheaper OpenRouter models by default |
 
 ---
@@ -103,6 +103,7 @@
 | Router paths are resolved relative to the chosen config file | Running the CLI from another working directory must not break router configs or traces | 2026-03-07 |
 | Fresh final artifacts are written even when editorial warnings remain | Human review should see the newest Markdown/PDF rather than stale successful artifacts | 2026-03-07 |
 | Public tutorial drafts receive deterministic copy-edits for known tool-name confusions | Reader-facing artifacts should not leak obvious transcript homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
+| Published tutorial runs auto-trigger downstream render refresh | A fresh approved tutorial should refresh HTML/PDF artifacts in the same user flow instead of leaving stale finals on disk | 2026-03-07 |
 
 ---
 

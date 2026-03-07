@@ -97,7 +97,10 @@ The `tutorial` command is a downstream pipeline that consumes an existing
   - validates structure and evidence coverage
   - runs technical review plus adversarial review
   - always writes a fresh `tutorial_final.md` for the latest approved run
+  - immediately refreshes `tutorial_final.html`, `tutorial_final.pdf`, and
+    `render_manifest.json` through the downstream renderer
   - records unresolved editorial issues as warnings in `tutorial_manifest.json`
+  - returns a non-zero exit code if the downstream PDF render fails
 - Published tutorial Markdown is intended to be reader-facing:
   - context first
   - table of contents plus back-to-top navigation
@@ -128,6 +131,8 @@ existing `tutorial_manifest.json`.
   - `tutorial_final.pdf`
   - `render_manifest.json`
 - It does not rerun tutorial generation or call the LLM.
+- Use it when you want to rerender an already-published tutorial without
+  rerunning the tutorial generation flow.
 
 Example:
 
