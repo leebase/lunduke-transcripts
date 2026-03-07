@@ -57,3 +57,33 @@ def test_llm_timeout_exhaustion_raises(monkeypatch) -> None:
     monkeypatch.setattr(adapter, "_build_client", lambda: _FakeClient("always-timeout"))
     with pytest.raises(RuntimeError, match="llm_timeout"):
         adapter.clean_transcript("hello world")
+
+
+def test_run_json_task_parses_fenced_json(monkeypatch) -> None:
+    adapter = LLMAdapter(
+        provider="openai",
+        model="gpt-4.1-mini",
+        prompt_version="v1",
+        timeout_seconds=1,
+        retries=0,
+        retry_backoff_seconds=0,
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        adapter,
+        "_build_client",
+        lambda: types.SimpleNamespace(
+            responses=types.SimpleNamespace(
+                create=lambda *args, **kwargs: types.SimpleNamespace(
+                    output_text='```json\n{"ok": true}\n```'
+                )
+            )
+        ),
+    )
+
+    payload, _, _ = adapter.run_json_task(
+        task_name="tutorial.review",
+        system_prompt="system",
+        user_prompt="user",
+    )
+    assert payload == {"ok": True}

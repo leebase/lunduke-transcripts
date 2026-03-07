@@ -24,6 +24,12 @@ def test_env_file_and_overrides(tmp_path, monkeypatch) -> None:
 data_dir = "data"
 enable_cleanup = false
 enable_article = false
+enable_asr_fallback = true
+asr_provider = "fast-whisper"
+asr_model = "small.en"
+frame_capture_enabled = true
+frame_capture_threshold = 0.4
+frame_image_format = "png"
 
 [llm]
 provider = "openai"
@@ -32,6 +38,19 @@ model = "gpt-4.1-mini"
 [[channels]]
 name = "Example"
 url = "https://www.youtube.com/@example/videos"
+
+[[videos]]
+name = "One video"
+url = "https://www.youtube.com/watch?v=i6idieq9bso"
+clip_start = "00:30:40"
+clip_end = "01:12:35"
+force_asr = true
+
+[[files]]
+name = "One file"
+path = "/tmp/demo.mp4"
+clip_start = "00:00:05"
+clip_end = "00:00:30"
 """.strip() + "\n",
         encoding="utf-8",
     )
@@ -45,3 +64,17 @@ url = "https://www.youtube.com/@example/videos"
     assert config.llm.provider == "openrouter"
     assert config.llm.model == "openai/gpt-4.1-mini"
     assert config.app.enable_article is True
+    assert config.app.enable_asr_fallback is True
+    assert config.app.asr_provider == "fast-whisper"
+    assert config.app.frame_capture_enabled is True
+    assert config.app.frame_capture_threshold == 0.4
+    assert config.app.frame_image_format == "png"
+    assert len(config.channels) == 1
+    assert len(config.videos) == 1
+    assert len(config.files) == 1
+    assert config.videos[0].clip_start == "00:30:40"
+    assert config.videos[0].clip_end == "01:12:35"
+    assert config.videos[0].force_asr is True
+    assert config.files[0].path == "/tmp/demo.mp4"
+    assert config.files[0].clip_start == "00:00:05"
+    assert config.files[0].clip_end == "00:00:30"

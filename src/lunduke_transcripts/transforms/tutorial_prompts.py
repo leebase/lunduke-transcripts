@@ -1,0 +1,357 @@
+"""Prompt builders for the multi-agent tutorial pipeline."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from lunduke_transcripts.app.tutorial_agent_registry import AgentSpec
+
+
+def build_system_prompt(agent: AgentSpec) -> str:
+    """Compose one system prompt from the agent role and its skills."""
+
+    parts = [agent.body.strip()]
+    for skill in agent.skills:
+        parts.append(f"Skill: {skill.name}\n{skill.body.strip()}")
+    return "\n\n".join(part for part in parts if part).strip() + "\n"
+
+
+def build_educator_prompt(
+    *,
+    bundle: dict[str, Any],
+    transcript: dict[str, Any],
+    frame_manifest: dict[str, Any] | None,
+) -> str:
+    return _prompt_with_json(
+        title="Create the tutorial definition of done.",
+        sections={
+            "Source bundle": bundle,
+            "Transcript summary": {
+                "title": transcript.get("title"),
+                "language": transcript.get("language"),
+                "transcript_source": transcript.get("transcript_source"),
+                "segment_count": len(transcript.get("segments", [])),
+                "segments_preview": transcript.get("segments", [])[:8],
+                "frame_count": len((frame_manifest or {}).get("frames", [])),
+            },
+        },
+        instructions=[
+            "Return JSON only.",
+            "Audience defaults to a technical user.",
+            "Allowed enrichment must be `light`.",
+            "First output target must be `markdown`.",
+            "Unsupported factual claims must be blocking.",
+            (
+                "Weak visual support must be blocking unless a step is "
+                "explicitly text-only."
+            ),
+        ],
+        schema={
+            "target_audience": "technical_user",
+            "learning_objectives": ["..."],
+            "prerequisites": ["..."],
+            "success_criteria": ["..."],
+            "allowed_enrichment_level": "light",
+            "evidence_requirements": {
+                "transcript_support_required": True,
+                "unsupported_factual_claims_block": True,
+            },
+            "visual_requirements": {
+                "weak_visual_support_blocks": True,
+                "text_only_requires_justification": True,
+            },
+            "blocking_conditions": ["..."],
+            "output_targets": ["markdown"],
+        },
+    )
+
+
+def build_planner_prompt(
+    *,
+    definition: dict[str, Any],
+    transcript: dict[str, Any],
+    feedback: list[str],
+) -> str:
+    return _prompt_with_json(
+        title="Plan the tutorial structure from the definition and transcript.",
+        sections={
+            "Tutorial definition": definition,
+            "Transcript segments": transcript.get("segments", []),
+            "Review feedback": feedback,
+        },
+        instructions=[
+            "Return JSON only.",
+            "Create 2-6 sections with ordered steps.",
+            "Each step must include a stable `step_id`.",
+            "Flag assumptions and prerequisites that matter to execution.",
+        ],
+        schema={
+            "sections": [
+                {
+                    "section_id": "section-1",
+                    "title": "...",
+                    "goal": "...",
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "title": "...",
+                            "instruction": "...",
+                            "assumptions": ["..."],
+                            "text_only_allowed": False,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+
+def build_evidence_prompt(
+    *,
+    definition: dict[str, Any],
+    outline: dict[str, Any],
+    transcript: dict[str, Any],
+    feedback: list[str],
+) -> str:
+    return _prompt_with_json(
+        title="Map each tutorial step to transcript evidence.",
+        sections={
+            "Tutorial definition": definition,
+            "Lesson outline": outline,
+            "Transcript segments": transcript.get("segments", []),
+            "Review feedback": feedback,
+        },
+        instructions=[
+            "Return JSON only.",
+            "Every step must map to transcript segment indexes.",
+            "Use `weak` evidence strength if the support is thin or implied.",
+        ],
+        schema={
+            "steps": [
+                {
+                    "step_id": "step-1",
+                    "segment_indexes": [0, 1],
+                    "evidence_strength": "strong",
+                    "supporting_quote": "...",
+                    "assumptions": ["..."],
+                    "notes": "...",
+                }
+            ]
+        },
+    )
+
+
+def build_visual_prompt(
+    *,
+    definition: dict[str, Any],
+    outline: dict[str, Any],
+    evidence_map: dict[str, Any],
+    frame_manifest: dict[str, Any] | None,
+    tutorial_dir: Path,
+    feedback: list[str],
+) -> str:
+    frames = (frame_manifest or {}).get("frames", [])
+    return _prompt_with_json(
+        title="Select the best frame for each tutorial step.",
+        sections={
+            "Tutorial definition": definition,
+            "Lesson outline": outline,
+            "Evidence map": evidence_map,
+            "Frame candidates": frames,
+            "Tutorial dir": {"relative_image_base": str(tutorial_dir)},
+            "Review feedback": feedback,
+        },
+        instructions=[
+            "Return JSON only.",
+            "Each step must either choose one frame or mark the step as text-only.",
+            (
+                "If no frame is suitable, set `text_only` to true and provide "
+                "`text_only_reason`."
+            ),
+            "Use the original frame path from the manifest, not a copied path.",
+        ],
+        schema={
+            "steps": [
+                {
+                    "step_id": "step-1",
+                    "selected_frame_path": "frames/000000.jpg",
+                    "caption": "...",
+                    "alt_text": "...",
+                    "support_strength": "strong",
+                    "text_only": False,
+                    "text_only_reason": None,
+                    "notes": "...",
+                }
+            ]
+        },
+    )
+
+
+def build_writer_prompt(
+    *,
+    definition: dict[str, Any],
+    outline: dict[str, Any],
+    evidence_map: dict[str, Any],
+    frame_selection_plan: dict[str, Any],
+    review_feedback: list[str],
+) -> str:
+    return _prompt_with_markdown(
+        title="Write the tutorial draft in Markdown only.",
+        sections={
+            "Tutorial definition": definition,
+            "Lesson outline": outline,
+            "Evidence map": evidence_map,
+            "Frame selection plan": frame_selection_plan,
+            "Review feedback": review_feedback,
+        },
+        instructions=[
+            "Write only Markdown. Do not wrap it in code fences.",
+            "Stay grounded in the evidence map.",
+            "Use light enrichment only for orientation and transitions.",
+            "Include images with standard Markdown when a frame is selected.",
+            (
+                "Use the frame path relative to the tutorial directory, such as "
+                "`../frames/000000.jpg`."
+            ),
+        ],
+    )
+
+
+def build_technical_review_prompt(
+    *,
+    definition: dict[str, Any],
+    outline: dict[str, Any],
+    evidence_map: dict[str, Any],
+    frame_selection_plan: dict[str, Any],
+    draft_markdown: str,
+    validation_report: dict[str, Any],
+) -> str:
+    return _prompt_with_json(
+        title="Review the tutorial draft like a technical reviewer.",
+        sections={
+            "Tutorial definition": definition,
+            "Lesson outline": outline,
+            "Evidence map": evidence_map,
+            "Frame selection plan": frame_selection_plan,
+            "Validation report": validation_report,
+            "Draft markdown": draft_markdown,
+        },
+        instructions=[
+            "Return JSON only.",
+            (
+                "Focus on technical accuracy, completeness, sequence quality, "
+                "and operational usability."
+            ),
+            "Do not rewrite the draft. Report findings only.",
+            (
+                "Each finding must include `severity`, `category`, "
+                "`message`, and `reroute_target`."
+            ),
+        ],
+        schema={
+            "overall_blocked": False,
+            "findings": [
+                {
+                    "severity": "medium",
+                    "category": "completeness",
+                    "message": "...",
+                    "step_id": "step-1",
+                    "reroute_target": "script-writer",
+                }
+            ],
+        },
+    )
+
+
+def build_adversarial_review_prompt(
+    *,
+    definition: dict[str, Any],
+    outline: dict[str, Any],
+    evidence_map: dict[str, Any],
+    frame_selection_plan: dict[str, Any],
+    draft_markdown: str,
+    validation_report: dict[str, Any],
+) -> str:
+    return _prompt_with_json(
+        title="Adversarially attack this tutorial draft.",
+        sections={
+            "Tutorial definition": definition,
+            "Lesson outline": outline,
+            "Evidence map": evidence_map,
+            "Frame selection plan": frame_selection_plan,
+            "Validation report": validation_report,
+            "Draft markdown": draft_markdown,
+        },
+        instructions=[
+            "Return JSON only.",
+            (
+                "Attack unsupported claims, transcript meaning drift, learner "
+                "confusion, and weak screenshot support."
+            ),
+            "Do not rewrite the tutorial.",
+            "Any factual drift must block.",
+            (
+                "Each finding must include `severity`, `category`, "
+                "`message`, and `reroute_target`."
+            ),
+        ],
+        schema={
+            "source_fidelity_score": 1.0,
+            "teachability_score": 1.0,
+            "visual_support_score": 1.0,
+            "overall_blocked": False,
+            "recommended_reroute": "script-writer",
+            "findings": [
+                {
+                    "severity": "blocking",
+                    "category": "source_fidelity",
+                    "message": "...",
+                    "step_id": "step-1",
+                    "reroute_target": "evidence-mapper",
+                }
+            ],
+        },
+    )
+
+
+def _prompt_with_json(
+    *,
+    title: str,
+    sections: dict[str, Any],
+    instructions: list[str],
+    schema: dict[str, Any],
+) -> str:
+    lines = [title, ""]
+    for heading, payload in sections.items():
+        lines.append(f"{heading}:")
+        lines.append(json.dumps(payload, indent=2, sort_keys=True))
+        lines.append("")
+    lines.append("Instructions:")
+    for instruction in instructions:
+        lines.append(f"- {instruction}")
+    lines.append("")
+    lines.append("Return JSON with this shape:")
+    lines.append(json.dumps(schema, indent=2, sort_keys=True))
+    return "\n".join(lines).strip() + "\n"
+
+
+def _prompt_with_markdown(
+    *,
+    title: str,
+    sections: dict[str, Any],
+    instructions: list[str],
+) -> str:
+    lines = [title, ""]
+    for heading, payload in sections.items():
+        lines.append(f"{heading}:")
+        if isinstance(payload, str):
+            lines.append(payload)
+        else:
+            lines.append(json.dumps(payload, indent=2, sort_keys=True))
+        lines.append("")
+    lines.append("Instructions:")
+    for instruction in instructions:
+        lines.append(f"- {instruction}")
+    return "\n".join(lines).strip() + "\n"

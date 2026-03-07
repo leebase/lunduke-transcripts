@@ -75,6 +75,7 @@ class Storage:
         cur.executescript("""
             CREATE TABLE IF NOT EXISTS videos (
                 video_id TEXT PRIMARY KEY,
+                source_kind TEXT NOT NULL DEFAULT 'youtube_video',
                 channel_id TEXT,
                 channel_name TEXT NOT NULL,
                 channel_url TEXT NOT NULL,
@@ -84,6 +85,7 @@ class Storage:
                 published_at TEXT,
                 duration_seconds INTEGER,
                 video_url TEXT NOT NULL,
+                local_path TEXT,
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL
             );
@@ -95,12 +97,15 @@ class Storage:
                 exact_hash TEXT,
                 exact_path TEXT,
                 exact_text_path TEXT,
+                transcript_json_path TEXT,
                 clean_path TEXT,
                 clean_model TEXT,
                 clean_prompt_version TEXT,
                 article_path TEXT,
                 article_model TEXT,
                 article_prompt_version TEXT,
+                frame_manifest_path TEXT,
+                tutorial_asset_bundle_path TEXT,
                 captured_at TEXT NOT NULL
             );
 
@@ -129,9 +134,18 @@ class Storage:
             );
             """)
         self._ensure_column("videos", "artifact_dir", "TEXT")
+        self._ensure_column(
+            "videos",
+            "source_kind",
+            "TEXT NOT NULL DEFAULT 'youtube_video'",
+        )
+        self._ensure_column("videos", "local_path", "TEXT")
         self._ensure_column("transcripts", "article_path", "TEXT")
         self._ensure_column("transcripts", "article_model", "TEXT")
         self._ensure_column("transcripts", "article_prompt_version", "TEXT")
+        self._ensure_column("transcripts", "transcript_json_path", "TEXT")
+        self._ensure_column("transcripts", "frame_manifest_path", "TEXT")
+        self._ensure_column("transcripts", "tutorial_asset_bundle_path", "TEXT")
         self._migrate_undated_artifact_dirs()
         self.conn.commit()
 
@@ -203,7 +217,8 @@ class Storage:
     ) -> None:
         row = self.conn.execute(
             """
-            SELECT exact_path, exact_text_path, clean_path, article_path
+            SELECT exact_path, exact_text_path, transcript_json_path, clean_path,
+                   article_path, frame_manifest_path, tutorial_asset_bundle_path
             FROM transcripts
             WHERE video_id = ?
             """,
@@ -223,14 +238,19 @@ class Storage:
         self.conn.execute(
             """
             UPDATE transcripts
-            SET exact_path = ?, exact_text_path = ?, clean_path = ?, article_path = ?
+            SET exact_path = ?, exact_text_path = ?, transcript_json_path = ?,
+                clean_path = ?, article_path = ?, frame_manifest_path = ?,
+                tutorial_asset_bundle_path = ?
             WHERE video_id = ?
             """,
             (
                 rewrite(row["exact_path"]),
                 rewrite(row["exact_text_path"]),
+                rewrite(row["transcript_json_path"]),
                 rewrite(row["clean_path"]),
                 rewrite(row["article_path"]),
+                rewrite(row["frame_manifest_path"]),
+                rewrite(row["tutorial_asset_bundle_path"]),
                 video_id,
             ),
         )
@@ -314,12 +334,14 @@ class Storage:
         self.conn.execute(
             """
             INSERT INTO videos (
-                video_id, channel_id, channel_name, channel_url, title,
+                video_id, source_kind, channel_id, channel_name, channel_url, title,
                 artifact_dir, description,
-                published_at, duration_seconds, video_url, first_seen_at, last_seen_at
+                published_at, duration_seconds, video_url, local_path,
+                first_seen_at, last_seen_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
+                source_kind=excluded.source_kind,
                 channel_id=excluded.channel_id,
                 channel_name=excluded.channel_name,
                 channel_url=excluded.channel_url,
@@ -335,19 +357,22 @@ class Storage:
                     excluded.duration_seconds, videos.duration_seconds
                 ),
                 video_url=excluded.video_url,
+                local_path=COALESCE(excluded.local_path, videos.local_path),
                 last_seen_at=excluded.last_seen_at
             """,
             (
                 video.video_id,
+                video.source_kind,
                 video.channel_id,
                 video.channel_name,
-                video.channel_url,
+                video.channel_url or video.video_url or video.video_id,
                 video.title,
                 artifact_dir,
                 video.description,
                 _iso(video.published_at),
                 video.duration_seconds,
-                video.video_url,
+                video.video_url or video.video_id,
+                video.local_path,
                 now_iso,
                 now_iso,
             ),
@@ -396,11 +421,13 @@ class Storage:
             return None
         return VideoRecord(
             video_id=row["video_id"],
+            title=row["title"],
+            source_kind=row["source_kind"] or "youtube_video",
             video_url=row["video_url"],
+            local_path=row["local_path"],
             channel_id=row["channel_id"],
             channel_name=row["channel_name"],
             channel_url=row["channel_url"],
-            title=row["title"],
             description=row["description"],
             published_at=_from_iso(row["published_at"]),
             duration_seconds=row["duration_seconds"],
@@ -445,11 +472,13 @@ class Storage:
         return [
             VideoRecord(
                 video_id=row["video_id"],
+                title=row["title"],
+                source_kind=row["source_kind"] or "youtube_video",
                 video_url=row["video_url"],
+                local_path=row["local_path"],
                 channel_id=row["channel_id"],
                 channel_name=row["channel_name"],
                 channel_url=row["channel_url"],
-                title=row["title"],
                 description=row["description"],
                 published_at=_from_iso(row["published_at"]),
                 duration_seconds=row["duration_seconds"],
@@ -458,7 +487,11 @@ class Storage:
         ]
 
     def write_video_metadata(
-        self, video: VideoRecord, transcript_source: str, language: str | None
+        self,
+        video: VideoRecord,
+        transcript_source: str,
+        language: str | None,
+        source_details: dict[str, str] | None = None,
     ) -> Path:
         video_dir = self._video_dir_for(
             video.video_id, title=video.title, published_at=video.published_at
@@ -473,6 +506,8 @@ class Storage:
             "transcript_source": transcript_source,
             "transcript_language": language,
         }
+        if source_details:
+            payload["transcript_source_details"] = source_details
         metadata_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -494,34 +529,41 @@ class Storage:
         exact_hash: str | None,
         exact_path: Path | None,
         exact_text_path: Path | None,
+        transcript_json_path: Path | None,
         clean_path: Path | None,
         clean_model: str | None,
         clean_prompt_version: str | None,
         article_path: Path | None,
         article_model: str | None,
         article_prompt_version: str | None,
+        frame_manifest_path: Path | None,
+        tutorial_asset_bundle_path: Path | None,
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO transcripts (
                 video_id, language, source_type, exact_hash, exact_path,
-                exact_text_path, clean_path, clean_model,
+                exact_text_path, transcript_json_path, clean_path, clean_model,
                 clean_prompt_version, article_path, article_model,
-                article_prompt_version, captured_at
+                article_prompt_version, frame_manifest_path,
+                tutorial_asset_bundle_path, captured_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                 language=excluded.language,
                 source_type=excluded.source_type,
                 exact_hash=excluded.exact_hash,
                 exact_path=excluded.exact_path,
                 exact_text_path=excluded.exact_text_path,
+                transcript_json_path=excluded.transcript_json_path,
                 clean_path=excluded.clean_path,
                 clean_model=excluded.clean_model,
                 clean_prompt_version=excluded.clean_prompt_version,
                 article_path=excluded.article_path,
                 article_model=excluded.article_model,
                 article_prompt_version=excluded.article_prompt_version,
+                frame_manifest_path=excluded.frame_manifest_path,
+                tutorial_asset_bundle_path=excluded.tutorial_asset_bundle_path,
                 captured_at=excluded.captured_at
             """,
             (
@@ -531,12 +573,19 @@ class Storage:
                 exact_hash,
                 str(exact_path) if exact_path else None,
                 str(exact_text_path) if exact_text_path else None,
+                str(transcript_json_path) if transcript_json_path else None,
                 str(clean_path) if clean_path else None,
                 clean_model,
                 clean_prompt_version,
                 str(article_path) if article_path else None,
                 article_model,
                 article_prompt_version,
+                str(frame_manifest_path) if frame_manifest_path else None,
+                (
+                    str(tutorial_asset_bundle_path)
+                    if tutorial_asset_bundle_path
+                    else None
+                ),
                 _iso(datetime.now(tz=UTC)),
             ),
         )

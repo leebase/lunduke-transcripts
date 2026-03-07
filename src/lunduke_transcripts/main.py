@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -11,16 +12,24 @@ from zoneinfo import ZoneInfo
 
 from lunduke_transcripts import __version__
 from lunduke_transcripts.app.orchestrator import Orchestrator
+from lunduke_transcripts.app.tutorial_agent_registry import TutorialAgentRegistry
+from lunduke_transcripts.app.tutorial_pipeline import TutorialPipeline
+from lunduke_transcripts.app.tutorial_render_pipeline import TutorialRenderPipeline
 from lunduke_transcripts.config import (
     ChannelConfig,
     Config,
+    FileConfig,
+    VideoConfig,
     default_config_from_env,
     load_config,
     load_env_file,
 )
 from lunduke_transcripts.domain.models import RunOptions
+from lunduke_transcripts.infra.asr_plugins.registry import build_asr_plugin
 from lunduke_transcripts.infra.llm_adapter import LLMAdapter
+from lunduke_transcripts.infra.local_media_adapter import LocalMediaAdapter
 from lunduke_transcripts.infra.storage import Storage
+from lunduke_transcripts.infra.video_frame_extractor import VideoFrameExtractor
 from lunduke_transcripts.infra.youtube_adapter import YtDlpAdapter
 
 
@@ -61,6 +70,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Direct YouTube target URL (video/channel/playlist). Can be repeated.",
     )
     run_parser.add_argument(
+        "--channel-url",
+        action="append",
+        default=[],
+        help="Explicit YouTube channel/videos URL target. Can be repeated.",
+    )
+    run_parser.add_argument(
+        "--video-url",
+        action="append",
+        default=[],
+        help="Explicit single YouTube video URL target. Can be repeated.",
+    )
+    run_parser.add_argument(
+        "--video-file",
+        action="append",
+        default=[],
+        help="Explicit local video file target. Can be repeated.",
+    )
+    run_parser.add_argument(
         "--from", dest="from_date", help="Published date start (YYYY-MM-DD)"
     )
     run_parser.add_argument(
@@ -77,9 +104,102 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate a faithful news-style article from the exact transcript",
     )
     run_parser.add_argument(
+        "--asr-fallback",
+        action="store_true",
+        help="Enable ASR fallback when captions are unavailable",
+    )
+    run_parser.add_argument(
+        "--force-asr",
+        action="store_true",
+        help="Force ASR path even when captions are available",
+    )
+    run_parser.add_argument(
+        "--clip-start",
+        help="Optional clip start for CLI video targets (HH:MM:SS)",
+    )
+    run_parser.add_argument(
+        "--clip-end",
+        help="Optional clip end for CLI video targets (HH:MM:SS)",
+    )
+    run_parser.add_argument(
         "--env-file",
         default=".env",
         help="Path to env file for provider/model/API keys (default: .env)",
+    )
+
+    tutorial_parser = subparsers.add_parser(
+        "tutorial",
+        help="Generate tutorial artifacts from a tutorial asset bundle",
+    )
+    tutorial_parser.add_argument(
+        "--bundle",
+        required=True,
+        help="Path to tutorial_asset_bundle.json",
+    )
+    tutorial_parser.add_argument(
+        "--config",
+        default="config/channels.toml",
+        help="Path to TOML config for LLM settings (default: config/channels.toml)",
+    )
+    tutorial_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="Path to env file for provider/model/API keys (default: .env)",
+    )
+    tutorial_parser.add_argument(
+        "--approve-outline",
+        action="store_true",
+        help="Mark the outline package as human-approved and continue the pipeline",
+    )
+    tutorial_parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="Re-run tutorial generation even if cached outputs match",
+    )
+    tutorial_parser.add_argument(
+        "--max-review-cycles",
+        type=int,
+        default=1,
+        help="Maximum automatic review-response cycles (default: 1)",
+    )
+    tutorial_parser.add_argument(
+        "--agents-dir",
+        default=str(_repo_root() / "agents"),
+        help="Directory containing tutorial agent role files",
+    )
+    tutorial_parser.add_argument(
+        "--skills-dir",
+        default=str(_repo_root() / "skills"),
+        help="Directory containing tutorial skill files",
+    )
+
+    render_parser = subparsers.add_parser(
+        "render",
+        help="Render a published tutorial manifest into downstream formats",
+    )
+    render_parser.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to tutorial_manifest.json",
+    )
+    render_parser.add_argument(
+        "--target",
+        choices=["pdf"],
+        default="pdf",
+        help="Render target (default: pdf)",
+    )
+    render_parser.add_argument(
+        "--config",
+        default="config/channels.toml",
+        help=(
+            "Path to TOML config for renderer settings "
+            "(default: config/channels.toml)"
+        ),
+    )
+    render_parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="Path to env file for renderer overrides (default: .env)",
     )
     return parser
 
@@ -97,37 +217,146 @@ def _derive_channel_name(url: str, idx: int) -> str:
     return f"url-target-{idx}"
 
 
-def _with_url_channels(config: Config, urls: list[str]) -> Config:
+def _derive_video_name(url: str, idx: int) -> str:
+    parsed = urlparse(url)
+    if parsed.netloc.endswith("youtu.be"):
+        tail = parsed.path.strip("/")
+        if tail:
+            return f"video-{tail}"
+    if parsed.path == "/watch":
+        video_id = parse_qs(parsed.query).get("v", [None])[0]
+        if video_id:
+            return f"video-{video_id}"
+    parts = [part for part in parsed.path.split("/") if part]
+    if "shorts" in parts:
+        shorts_idx = parts.index("shorts")
+        if shorts_idx + 1 < len(parts):
+            return f"video-{parts[shorts_idx + 1]}"
+    return f"video-target-{idx}"
+
+
+def _derive_file_name(path: str, idx: int) -> str:
+    value = Path(path).expanduser()
+    if value.stem:
+        return value.stem
+    return f"file-target-{idx}"
+
+
+def _is_video_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.netloc.endswith("youtu.be"):
+        return bool(parsed.path.strip("/"))
+    if parsed.path == "/watch":
+        return bool(parse_qs(parsed.query).get("v"))
+    parts = [part for part in parsed.path.split("/") if part]
+    return "shorts" in parts
+
+
+def _with_cli_targets(
+    config: Config,
+    urls: list[str],
+    channel_urls: list[str],
+    video_urls: list[str],
+    video_files: list[str],
+    clip_start: str | None,
+    clip_end: str | None,
+    force_asr: bool,
+) -> Config:
+    inferred_channels: list[str] = []
+    inferred_videos: list[str] = []
+    for url in urls:
+        if _is_video_url(url):
+            inferred_videos.append(url)
+        else:
+            inferred_channels.append(url)
+
+    effective_channel_urls = [*channel_urls, *inferred_channels]
+    effective_video_urls = [*video_urls, *inferred_videos]
+
     channels = [
         ChannelConfig(
             name=_derive_channel_name(url, idx),
             url=url,
             language=config.app.default_language,
         )
-        for idx, url in enumerate(urls, start=1)
+        for idx, url in enumerate(effective_channel_urls, start=1)
     ]
-    return Config(app=config.app, llm=config.llm, channels=channels)
+    videos = [
+        VideoConfig(
+            name=_derive_video_name(url, idx),
+            url=url,
+            language=config.app.default_language,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            force_asr=True if force_asr else None,
+        )
+        for idx, url in enumerate(effective_video_urls, start=1)
+    ]
+    files = [
+        FileConfig(
+            name=_derive_file_name(path, idx),
+            path=path,
+            language=config.app.default_language,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            force_asr=True if force_asr else None,
+        )
+        for idx, path in enumerate(video_files, start=1)
+    ]
+    return Config(
+        app=config.app,
+        llm=config.llm,
+        channels=channels,
+        videos=videos,
+        files=files,
+    )
 
 
 def run_command(args: argparse.Namespace) -> int:
     """Execute the run pipeline command."""
 
     load_env_file(args.env_file)
+    has_cli_targets = bool(
+        args.url or args.channel_url or args.video_url or args.video_file
+    )
     config_path = Path(args.config)
     if config_path.exists():
         config = load_config(config_path)
-    elif args.url:
+    elif has_cli_targets:
         config = default_config_from_env()
     else:
         raise SystemExit(
-            f"Config file not found: {config_path}. Provide --config or pass --url."
+            f"Config file not found: {config_path}. Provide --config or pass "
+            "--url/--channel-url/--video-url/--video-file."
         )
-    if args.url:
-        config = _with_url_channels(config, args.url)
-    if not config.channels:
+    if has_cli_targets:
+        config = _with_cli_targets(
+            config=config,
+            urls=args.url,
+            channel_urls=args.channel_url,
+            video_urls=args.video_url,
+            video_files=args.video_file,
+            clip_start=args.clip_start,
+            clip_end=args.clip_end,
+            force_asr=bool(args.force_asr),
+        )
+    app_cfg = config.app
+    if args.asr_fallback:
+        app_cfg = replace(app_cfg, enable_asr_fallback=True)
+    if args.force_asr:
+        app_cfg = replace(app_cfg, force_asr=True)
+    if app_cfg is not config.app:
+        config = Config(
+            app=app_cfg,
+            llm=config.llm,
+            channels=config.channels,
+            videos=config.videos,
+            files=config.files,
+        )
+    if not config.channels and not config.videos and not config.files:
         raise SystemExit(
-            "No channels configured. "
-            "Add channels in config or pass one or more --url values."
+            "No targets configured. Add [[channels]]/[[videos]]/[[files]] in config "
+            "or pass --url/--channel-url/--video-url/--video-file values."
         )
     from_utc = (
         _parse_date(args.from_date, config.app.timezone, end_of_day=False)
@@ -145,10 +374,13 @@ def run_command(args: argparse.Namespace) -> int:
     storage = Storage(config.app.data_dir)
     youtube = YtDlpAdapter(
         binary=config.app.yt_dlp_binary,
+        ffmpeg_binary=config.app.ffmpeg_binary,
         timeout_seconds=config.app.yt_dlp_timeout_seconds,
+        ffmpeg_timeout_seconds=config.app.ffmpeg_timeout_seconds,
         retries=config.app.fetch_retries,
         backoff_seconds=config.app.retry_backoff_seconds,
     )
+    asr_plugin = build_asr_plugin(config.app)
     llm = LLMAdapter(
         provider=config.llm.provider,
         model=config.llm.model,
@@ -157,8 +389,25 @@ def run_command(args: argparse.Namespace) -> int:
         retries=config.llm.retries,
         retry_backoff_seconds=config.llm.retry_backoff_seconds,
     )
+    local_media = LocalMediaAdapter(
+        ffmpeg_binary=config.app.ffmpeg_binary,
+        ffprobe_binary=config.app.ffprobe_binary,
+        ffmpeg_timeout_seconds=config.app.ffmpeg_timeout_seconds,
+    )
+    frame_extractor = VideoFrameExtractor(
+        ffmpeg_binary=config.app.ffmpeg_binary,
+        threshold=config.app.frame_capture_threshold,
+        image_format=config.app.frame_image_format,
+        timeout_seconds=config.app.ffmpeg_timeout_seconds,
+    )
     orchestrator = Orchestrator(
-        config=config, storage=storage, youtube=youtube, llm=llm
+        config=config,
+        storage=storage,
+        youtube=youtube,
+        llm=llm,
+        asr_plugin=asr_plugin,
+        local_media=local_media,
+        frame_extractor=frame_extractor,
     )
     summary = orchestrator.run(
         RunOptions(
@@ -185,6 +434,104 @@ def run_command(args: argparse.Namespace) -> int:
     return 0 if summary.status in {"success", "partial"} else 1
 
 
+def tutorial_command(args: argparse.Namespace) -> int:
+    """Execute the multi-agent tutorial generation pipeline."""
+
+    load_env_file(args.env_file)
+    config_path = Path(args.config)
+    if config_path.exists():
+        config = load_config(config_path)
+    else:
+        config = default_config_from_env()
+    llm = LLMAdapter(
+        provider=config.llm.provider,
+        model=config.llm.model,
+        prompt_version=config.llm.prompt_version,
+        timeout_seconds=config.llm.timeout_seconds,
+        retries=config.llm.retries,
+        retry_backoff_seconds=config.llm.retry_backoff_seconds,
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=Path(args.agents_dir).expanduser().resolve(),
+            skills_dir=Path(args.skills_dir).expanduser().resolve(),
+        ),
+    )
+    try:
+        summary = pipeline.run(
+            bundle_path=Path(args.bundle),
+            approve_outline=bool(args.approve_outline),
+            reprocess=bool(args.reprocess),
+            max_review_cycles=max(int(args.max_review_cycles), 0),
+        )
+        payload = {
+            "status": summary.status,
+            "tutorial_dir": str(summary.tutorial_dir),
+            "manifest_path": str(summary.manifest_path),
+            "human_outline_approved": summary.human_outline_approved,
+            "publish_eligible": summary.publish_eligible,
+            "reused_cached_outputs": summary.reused_cached_outputs,
+            "review_cycles": summary.review_cycles,
+            "failures": summary.failures,
+        }
+        print(json.dumps(payload, indent=2))
+        return (
+            0
+            if summary.publish_eligible or summary.status == "awaiting_outline_approval"
+            else 1
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "bundle": str(Path(args.bundle).expanduser()),
+                    "error": str(exc),
+                },
+                indent=2,
+            )
+        )
+        return 1
+
+
+def render_command(args: argparse.Namespace) -> int:
+    """Render a published tutorial manifest into downstream document formats."""
+
+    load_env_file(args.env_file)
+    config_path = Path(args.config)
+    if config_path.exists():
+        config = load_config(config_path)
+    else:
+        config = default_config_from_env()
+
+    pipeline = TutorialRenderPipeline(
+        pandoc_binary=config.app.pandoc_binary,
+        pdf_engine=config.app.pdf_engine,
+        pdf_engine_binary=config.app.pdf_engine_binary,
+        renderer_dir=_repo_root() / "renderers",
+    )
+    summary = pipeline.run(
+        manifest_path=Path(args.manifest),
+        target=str(args.target),
+    )
+    payload = {
+        "status": summary.status,
+        "target": summary.target,
+        "tutorial_dir": str(summary.tutorial_dir),
+        "render_manifest_path": str(summary.render_manifest_path),
+        "html_path": str(summary.html_path) if summary.html_path else None,
+        "output_path": str(summary.output_path) if summary.output_path else None,
+        "failures": summary.failures,
+    }
+    print(json.dumps(payload, indent=2))
+    return 0 if summary.status == "success" else 1
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def main() -> None:
     """Entry point for console script."""
 
@@ -192,6 +539,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "run":
         raise SystemExit(run_command(args))
+    if args.command == "tutorial":
+        raise SystemExit(tutorial_command(args))
+    if args.command == "render":
+        raise SystemExit(render_command(args))
     parser.print_help()
     raise SystemExit(0)
 

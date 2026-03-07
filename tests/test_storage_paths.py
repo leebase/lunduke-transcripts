@@ -122,12 +122,15 @@ def test_initialize_migrates_existing_undated_folder_and_paths(tmp_path) -> None
         exact_hash="h",
         exact_path=undated_vtt,
         exact_text_path=None,
+        transcript_json_path=None,
         clean_path=None,
         clean_model=None,
         clean_prompt_version=None,
         article_path=None,
         article_model=None,
         article_prompt_version=None,
+        frame_manifest_path=None,
+        tutorial_asset_bundle_path=None,
     )
     storage.upsert_video(
         VideoRecord(

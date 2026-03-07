@@ -32,6 +32,9 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
 ]
+asr = [
+    "faster-whisper>=1.2.1",
+]
 
 [project.scripts]
 lunduke-transcripts = "lunduke_transcripts.main:main"

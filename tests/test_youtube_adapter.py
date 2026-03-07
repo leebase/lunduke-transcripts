@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from lunduke_transcripts.infra.youtube_adapter import YtDlpAdapter
+import lunduke_transcripts.infra.youtube_adapter as youtube_mod
+from lunduke_transcripts.infra.youtube_adapter import (
+    YtDlpAdapter,
+    _parse_timecode_seconds,
+)
 
 
 def test_ytdlp_timeout_retries_then_succeeds(monkeypatch) -> None:
@@ -56,3 +61,28 @@ def test_list_videos_handles_direct_watch_url_payload(monkeypatch) -> None:
     assert len(videos) == 1
     assert videos[0].video_id == "i6idieq9bso"
     assert videos[0].title.startswith("My Favorite Scripture")
+
+
+def test_resolve_binary_falls_back_to_current_python_bin(monkeypatch, tmp_path) -> None:
+    fake_python = tmp_path / "python"
+    fake_python.write_text("", encoding="utf-8")
+    fake_binary = tmp_path / "yt-dlp"
+    fake_binary.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(youtube_mod.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(youtube_mod.sys, "executable", str(fake_python))
+
+    adapter = YtDlpAdapter(binary="yt-dlp")
+    resolved = adapter._resolve_binary()
+    assert resolved == str(Path(fake_binary))
+
+
+def test_parse_timecode_seconds_variants() -> None:
+    assert _parse_timecode_seconds("30") == 30.0
+    assert _parse_timecode_seconds("12:34") == 754.0
+    assert _parse_timecode_seconds("01:12:35") == 4355.0
+
+
+def test_parse_timecode_seconds_invalid() -> None:
+    with pytest.raises(RuntimeError, match="invalid_timecode"):
+        _parse_timecode_seconds("1:2:3:4")

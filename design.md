@@ -1,48 +1,45 @@
 # Design: lunduke-transcripts
 
-> Architecture and technical design for a local-first YouTube transcript pipeline.
+> Architecture and technical design for a local-first transcript and frame-extraction pipeline.
 
 ---
 
 ## 1. Goals and Scope
 
-This design implements the requirements in [product-definition.md](product-definition.md):
+This design implements the current requirements in [product-definition.md](product-definition.md):
 
-- Run on demand or on a schedule.
-- Detect newly published videos and avoid duplicate processing.
-- Persist exact transcript output and cleaned transcript output.
-- Capture useful video/transcript metadata for future analysis.
+- ingest video from YouTube and local files
+- extract exact transcript artifacts
+- normalize transcript data into JSON
+- capture significant frame candidates as image files
+- write a canonical tutorial asset bundle for later renderers
 
-MVP focus is reliability, traceability, and simple operations on a single machine.
+Current phase focus is reliability, traceability, stable extraction artifacts, and
+a multi-agent written-tutorial pipeline built on top of the canonical bundle.
 
 ---
 
 ## 2. Stack Choice
 
-## Recommended Stack (MVP)
+## Recommended Stack
 
-- Language: Python 3.10+
-- Packaging/CLI: `setuptools` + stdlib `argparse` (move to `typer` only if UX needs grow)
-- Video/transcript acquisition: `yt-dlp` (invoked as a subprocess)
-- Data modeling/validation: `pydantic` (or stdlib dataclasses in slice 1)
+- Language: Python 3.11+
+- Packaging/CLI: `setuptools` + stdlib `argparse`
+- YouTube acquisition: `yt-dlp` (invoked as a subprocess)
+- Local/remote media processing: `ffmpeg` / `ffprobe`
+- ASR fallback: provider plugin interface (`fast-whisper` first implementation)
 - Storage:
   - SQLite for durable state and run logs
-  - filesystem artifacts (`.vtt`, `.md`, `.json`)
+  - filesystem artifacts (`.vtt`, `.md`, `.txt`, `.json`, `.jpg`)
 - Scheduling:
   - external scheduler (`cron` or `launchd`)
-  - app always exposes a single idempotent command for scheduler use
-- LLM cleanup provider: adapter interface (OpenAI first, swappable)
+  - app exposes one idempotent command for scheduler use
 
-## Why Python Is the Right Default
+## Why This Stack Still Fits
 
-- Best ecosystem for text processing and LLM integrations.
-- Fast development for file and process orchestration.
-- Easy local scheduling/invocation.
-- No clear advantage from switching to another stack for this workload.
-
-## If We Needed a Different Stack
-
-Only consider Go/Rust if startup footprint and binary-only distribution become top priorities. For this project, that tradeoff slows iteration without a significant product gain.
+- Python remains the fastest path for orchestration, file IO, text transforms, and later LLM integration.
+- `ffmpeg` already fits the media-processing boundary needed for frame extraction.
+- SQLite remains adequate because the source of truth is local and append-oriented.
 
 ---
 
@@ -50,79 +47,147 @@ Only consider Go/Rust if startup footprint and binary-only distribution become t
 
 ```mermaid
 flowchart TD
-    A["CLI: run"] --> B["Channel Enumerator"]
-    B --> C["New Video Detector"]
-    C --> D["Transcript Fetcher (yt-dlp adapter)"]
-    D --> E["Artifact Writer (exact transcript)"]
-    E --> F["LLM Cleanup Processor"]
-    F --> G["Artifact Writer (clean transcript)"]
-    C --> H["Metadata Builder"]
-    H --> G
-    G --> I["State Store (SQLite)"]
-    I --> J["Run Report"]
+    A["CLI: run"] --> B["Source Resolver"]
+    B --> C["Discovery / Target Builder"]
+    C --> D["State Filter"]
+    D --> E["Transcript Acquisition"]
+    E --> F["Transcript Normalizer"]
+    D --> G["Video Access"]
+    G --> H["Scene Change Detector"]
+    H --> I["Frame Writer"]
+    F --> J["Tutorial Asset Bundle Writer"]
+    I --> J
+    J --> K["State Store (SQLite)"]
+    K --> L["Run Report"]
 ```
 
-Design principle: isolate external fragility (YouTube extraction, LLM provider) behind adapters; keep domain logic internal and testable.
+Design principle: external volatility stays behind adapters, while transcript/frame
+normalization and bundle generation stay internal and testable.
 
 ---
 
-## 4. Module Layout (Proposed)
+## 4. Core Architectural Direction
 
-Current package path should be normalized to `src/lunduke_transcripts/` (underscore) for valid Python imports.
+### 4.1 Canonical Intermediate Artifacts
+
+The next phase should not generate final tutorials directly. It should generate a
+canonical tutorial asset bundle made of:
+
+- `transcript.json`
+- `frame_manifest.json`
+- `tutorial_asset_bundle.json`
+- referenced artifact files on disk
+
+This makes later renderers format-only concerns rather than reprocessing concerns.
+
+### 4.2 Images Stay on Disk
+
+Frame image bytes are not embedded in JSON.
+
+Instead:
+- frames are written under `frames/`
+- JSON stores relative paths, timestamps, and scoring metadata
+- later renderers dereference those paths
+
+This keeps JSON small, diffable, inspectable, and reusable.
+
+### 4.3 Hybrid Frame Strategy
+
+Frame selection should be two-stage:
+
+1. deterministic extraction of visual candidates using scene-change detection
+2. later optional scoring/selection based on transcript content or LLM reasoning
+
+This phase implements stage 1 and also adds a downstream multi-agent tutorial
+pipeline that consumes the canonical bundle.
+
+---
+
+## 5. Module Layout
 
 ```text
 src/lunduke_transcripts/
-  main.py                 # CLI entrypoint
-  config.py               # config loading + defaults
+  main.py
+  config.py
   domain/
-    models.py             # typed models (video, transcript, run status)
+    models.py                  # source, transcript, frame, bundle models
   app/
-    orchestrator.py       # run pipeline
+    orchestrator.py
+    single_video_transcriber.py
+    tutorial_asset_builder.py  # compose canonical bundle
+    tutorial_agent_registry.py # repo-local agent + skill loader
+    tutorial_pipeline.py       # multi-agent tutorial orchestration
   infra/
-    youtube_adapter.py    # yt-dlp invocation/parsing
-    llm_adapter.py        # cleanup provider interface
-    storage.py            # SQLite + filesystem IO
+    youtube_adapter.py         # yt-dlp invocation/parsing
+    local_media_adapter.py     # local file probing and extraction helpers
+    video_frame_extractor.py   # ffmpeg/ffprobe scene detection + frame writing
+    llm_adapter.py
+    asr_plugins/
+      base.py
+      fast_whisper.py
+      registry.py
+    storage.py
   transforms/
-    transcript_cleaner.py # prompt building + post-processing rules
-    vtt_parser.py         # exact transcript parsing/rendering
+    vtt_parser.py
+    transcript_json_writer.py
+    tutorial_prompts.py
 ```
+
+Notes:
+- `youtube_adapter.py` remains responsible for YouTube discovery and caption access.
+- `local_media_adapter.py` handles probing local files and sidecar subtitle discovery.
+- `video_frame_extractor.py` owns frame candidate extraction only, not later semantic selection.
+- `tutorial_pipeline.py` is downstream-only and never reruns transcript or frame extraction.
 
 ---
 
-## 5. Data Model
+## 6. Data Model
 
 ## SQLite Tables
 
 ### `videos`
-- `video_id` (PK)
+- `source_id` (PK)
+- `source_kind` (`youtube_video|local_file`)
+- `video_id` (nullable)
 - `channel_id`
 - `channel_name`
 - `title`
 - `description`
-- `published_at` (UTC ISO timestamp)
+- `published_at` (UTC ISO timestamp, nullable)
 - `duration_seconds`
-- `video_url`
+- `video_url` (nullable)
+- `local_path` (nullable)
+- `artifact_dir`
 - `first_seen_at`
 - `last_seen_at`
 
 ### `transcripts`
-- `id` (PK)
-- `video_id` (FK)
+- `source_id` (PK / FK)
 - `language`
-- `source_type` (`manual|auto|unavailable|unknown`)
-- `exact_hash` (content hash)
+- `source_type` (`manual|auto|asr_fast-whisper|unavailable|unknown`)
+- `exact_hash`
 - `exact_path`
-- `exact_text_path` (optional no-timestamp render)
-- `clean_path` (nullable if cleanup disabled/failed)
+- `exact_text_path`
+- `transcript_json_path`
 - `captured_at`
+
+### `frames`
+- `id` (PK)
+- `source_id` (FK)
+- `frame_index`
+- `timestamp_seconds`
+- `image_path`
+- `selection_kind` (`scene_candidate|selected`)
+- `scene_score` (nullable)
+- `notes` (nullable)
 
 ### `runs`
 - `run_id` (PK)
 - `started_at`
 - `finished_at`
-- `status` (`success|partial|failed`)
-- `filter_from` (nullable UTC ISO timestamp)
-- `filter_to` (nullable UTC ISO timestamp)
+- `status`
+- `filter_from`
+- `filter_to`
 - `videos_seen`
 - `videos_new`
 - `videos_processed`
@@ -132,8 +197,8 @@ src/lunduke_transcripts/
 ### `run_items`
 - `id` (PK)
 - `run_id` (FK)
-- `video_id`
-- `step` (`discover|fetch|clean|write`)
+- `source_id`
+- `step` (`discover|fetch|normalize|frames|bundle|write`)
 - `status`
 - `message`
 
@@ -142,173 +207,328 @@ src/lunduke_transcripts/
 ```text
 data/
   db/lunduke_transcripts.sqlite3
-  videos/<video_id>/
+  videos/<artifact_dir>/
     metadata.json
     transcript_exact.vtt
     transcript_exact.md
-    transcript_clean.md
+    transcript_exact.txt
+    transcript.json
+    frame_manifest.json
+    tutorial_asset_bundle.json
+    frames/
+      000123.jpg
+      000456.jpg
   runs/<run_id>.json
 ```
 
-SQLite is source of truth for state; JSON/Markdown artifacts are user-facing outputs.
+SQLite is source of truth for state. JSON artifacts are the portable contract for downstream tools.
+
+## Tutorial Artifacts
+
+Tutorial generation writes under `videos/<artifact_dir>/tutorial/`:
+
+- `tutorial_definition.json`
+- `lesson_outline.json`
+- `evidence_map.json`
+- `frame_selection_plan.json`
+- `tutorial_draft.md`
+- `tutorial_validation_report.json`
+- `technical_review_report.json`
+- `adversarial_review_report.json`
+- `tutorial_revision_plan.json`
+- `tutorial_manifest.json`
+- `tutorial_final.md` when publish-eligible
 
 ---
 
-## 6. Pipeline Behavior
+## 7. Canonical JSON Contracts
 
-## Manual Run
+## `transcript.json`
 
-Command:
+Purpose: normalized, timing-preserving transcript data derived from captions or ASR.
 
-```bash
-lunduke-transcripts run --config config/channels.toml
+Example shape:
+
+```json
+{
+  "schema_version": "1",
+  "source_id": "youtube:abc123",
+  "source_kind": "youtube_video",
+  "title": "Example Video",
+  "language": "en",
+  "transcript_source": "auto",
+  "artifacts": {
+    "exact_vtt": "transcript_exact.vtt",
+    "exact_markdown": "transcript_exact.md",
+    "exact_text": "transcript_exact.txt"
+  },
+  "segments": [
+    {
+      "segment_index": 0,
+      "start_seconds": 0.0,
+      "end_seconds": 4.32,
+      "start_timestamp": "00:00:00.000",
+      "end_timestamp": "00:00:04.320",
+      "text": "Welcome to the tutorial."
+    }
+  ]
+}
 ```
 
-Steps:
-1. Load config and init storage.
-2. Enumerate videos per channel.
-3. Upsert discovered videos.
-4. Select unprocessed/new videos.
-5. Fetch captions/transcripts via adapter.
-6. Write exact outputs.
-7. Run optional cleanup pass and write cleaned output.
-8. Persist per-video status and run summary.
+## `frame_manifest.json`
 
-## Date-Range Run (Optional)
+Purpose: all extracted frame candidates with file references and extraction metadata.
+
+Example shape:
+
+```json
+{
+  "schema_version": "1",
+  "source_id": "youtube:abc123",
+  "extraction_method": "ffmpeg_scene_detect",
+  "threshold": 0.25,
+  "frames": [
+    {
+      "frame_index": 0,
+      "timestamp_seconds": 12.4,
+      "timestamp": "00:00:12.400",
+      "image_path": "frames/000000.jpg",
+      "selection_kind": "scene_candidate",
+      "scene_score": 0.41
+    }
+  ]
+}
+```
+
+## `tutorial_asset_bundle.json`
+
+Purpose: one manifest that points to everything later renderers need.
+
+Example shape:
+
+```json
+{
+  "schema_version": "1",
+  "source_id": "youtube:abc123",
+  "source_kind": "youtube_video",
+  "title": "Example Video",
+  "metadata_path": "metadata.json",
+  "transcript_path": "transcript.json",
+  "frame_manifest_path": "frame_manifest.json",
+  "frame_capture": {
+    "status": "captured",
+    "error": null
+  },
+  "artifacts": {
+    "exact_vtt": "transcript_exact.vtt",
+    "exact_markdown": "transcript_exact.md",
+    "exact_text": "transcript_exact.txt"
+  }
+}
+```
+
+The bundle stays thin. It references other JSON and file artifacts rather than duplicating them. When frame capture is disabled or fails, `frame_manifest_path` is `null` and `frame_capture` carries the explicit status.
+
+---
+
+## 8. Pipeline Behavior
+
+## Manual Run
 
 Command examples:
 
 ```bash
-lunduke-transcripts run --config config/channels.toml --from 2026-02-01 --to 2026-02-29
-lunduke-transcripts run --config config/channels.toml --from 2026-02-01
-lunduke-transcripts run --config config/channels.toml --to 2026-02-29
+lunduke-transcripts run --video-url "https://www.youtube.com/watch?v=VIDEO_ID"
+lunduke-transcripts run --video-file "/path/to/video.mp4"
 ```
 
-Behavior:
-1. Parse date filters using configured app timezone.
-2. Convert boundaries to UTC timestamps for filtering and persistence.
-3. Filter candidate videos by `published_at` inclusive boundaries.
-4. Apply normal idempotency rules after filter match (skip already processed unless reprocess flag is set).
+Steps:
+1. Load config and initialize storage.
+2. Resolve targets from channels, explicit video URLs, and local files.
+3. Upsert discovered source metadata.
+4. Apply date-range and idempotency filters.
+5. Acquire transcript from captions, sidecar subtitles, or ASR.
+6. Write exact transcript artifacts.
+7. Normalize to `transcript.json`.
+8. Acquire accessible video media for frame extraction.
+9. Run scene-change detection and write frame files.
+10. Write `frame_manifest.json`.
+11. Write `tutorial_asset_bundle.json`, including explicit frame capture status.
+12. Persist per-source status and run summary.
+
+## Tutorial Run
+
+Command examples:
+
+```bash
+lunduke-transcripts tutorial --bundle "/path/to/tutorial_asset_bundle.json"
+lunduke-transcripts tutorial --bundle "/path/to/tutorial_asset_bundle.json" --approve-outline
+```
+
+Steps:
+1. Load the canonical bundle plus transcript and frame manifest.
+2. Load repo-local agent definitions from `agents/` and tutorial skills from `skills/`.
+3. Run educator, planner, evidence mapper, and visual editor to produce the outline package.
+4. Stop unless `--approve-outline` is present.
+5. Draft Markdown from the approved plan.
+6. Validate evidence, frame references, and metadata.
+7. Run technical review and adversarial review.
+8. Build a revision plan and reroute to the earliest stage that can fix the findings.
+9. Re-run downstream stages up to the configured review-cycle limit.
+10. Write `tutorial_final.md` only when the tutorial clears the gate.
+11. Write `tutorial_manifest.json` with agent/skill digests and review outcomes.
+
+## Date-Range Run
+
+- YouTube channel and video sources use `published_at` when available.
+- Local files usually do not have a meaningful publish date; if date filtering is requested and no publish date exists, skip with a clear run-item reason.
 
 ## Scheduled Run
 
-Use the same command via scheduler:
-
-- `cron` example: `15 * * * * cd /path && lunduke-transcripts run --config ...`
-- `launchd` equivalent on macOS.
-
-No special scheduler mode in app logic; idempotency handles repeat invocation safely.
+Use the same idempotent command via scheduler. No separate scheduler mode exists.
 
 ---
 
-## 7. Exact vs Clean Transcript Rules
+## 9. Transcript Acquisition Strategy
 
-## Exact Transcript
-- Never paraphrase.
-- Preserve available timing.
-- Keep a raw canonical file (`.vtt`) plus a readable render (`.md`).
+Priority order by source type:
 
-## Clean Transcript
-- Input is exact transcript text.
-- Allowed edits: punctuation, paragraphing, clear disfluency cleanup.
-- Disallowed edits: summarization, factual changes, invention.
-- Save prompt metadata and model identifier in `metadata.json` for traceability.
+### YouTube video
+1. explicit captions/subtitles via `yt-dlp`
+2. automatic captions via `yt-dlp`
+3. ASR fallback if enabled
+
+### Local file
+1. matching sidecar subtitles when present (`.vtt`, `.srt`)
+2. ASR fallback if enabled
+
+Normalization rule:
+- regardless of source, all transcript paths converge into exact transcript artifacts plus `transcript.json`
 
 ---
 
-## 8. Failure Handling
+## 10. Frame Extraction Strategy
+
+### 10.1 Candidate Extraction
+
+Use `ffmpeg` scene detection to extract frame candidates, for example:
+
+- detect meaningful visual changes
+- capture one frame per detected change boundary
+- store scene score where available
+
+### 10.2 Why Not LLM-Only Selection
+
+LLM-only frame picking based on transcript content is insufficient because:
+
+- it does not know whether the frame is visually informative
+- it cannot detect slide changes or UI changes directly
+- it tends to choose semantically important moments that may have poor screenshots
+
+### 10.3 Why Not Visual-Only Final Selection
+
+Visual-only detection over-produces frames and cannot know which frames are instructionally useful.
+
+Therefore:
+- this phase extracts candidates and records their metadata
+- a later phase may score or select instructional frames using transcript alignment or an LLM
+
+---
+
+## 11. Failure Handling
 
 - Missing captions: mark as `unavailable`, continue.
-- yt-dlp transient failure: retry with backoff (bounded).
-- LLM failure: keep exact transcript, mark clean step failed, continue.
-- One video failure must not fail entire run.
-- Run returns non-zero only when system-level failure prevents meaningful processing.
+- Missing captions with ASR enabled: attempt ASR fallback and continue if ASR fails.
+- Missing sidecar subtitles for local files: fall back to ASR when enabled.
+- Media unavailable for frame extraction: transcript artifacts may still succeed; mark frame step failed separately.
+- `yt-dlp` transient failure: retry with backoff.
+- `ffmpeg`/`ffprobe` failure: log `frames` step with actionable reason, continue run.
+- Missing LLM credentials for tutorial generation: fail the tutorial command with a machine-readable error payload.
+- Review failure after max cycles: write revision artifacts and block publish eligibility.
+- One source failure must not fail the entire run.
+- Run returns non-zero only when a system-level failure prevents meaningful processing.
 
 ---
 
-## 9. Configuration
+## 12. Configuration Direction
 
-`config/channels.toml` (example):
+Current config should evolve to support:
 
 ```toml
 [app]
 data_dir = "data"
 default_language = "en"
 timezone = "America/Chicago"
-enable_cleanup = true
+enable_asr_fallback = true
+frame_capture_enabled = true
+frame_capture_threshold = 0.25
+frame_image_format = "jpg"
+ffmpeg_binary = "ffmpeg"
+ffprobe_binary = "ffprobe"
 
-[llm]
-provider = "openai"
-model = "gpt-4.1-mini"
+[[videos]]
+name = "Specific YouTube Video"
+url = "https://www.youtube.com/watch?v=VIDEO_ID"
+language = "en"
 
-[[channels]]
-name = "Example Journalist"
-url = "https://www.youtube.com/@example/videos"
+[[files]]
+name = "Local Demo Video"
+path = "/absolute/path/demo.mp4"
 language = "en"
 ```
 
-Configuration is explicit file-based for reproducibility; CLI flags may override.
-
-### CLI Contract (MVP)
-- `--from YYYY-MM-DD` optional publish-date lower bound (inclusive)
-- `--to YYYY-MM-DD` optional publish-date upper bound (inclusive)
-- `--reprocess` optional flag to process already handled videos that match filters
+CLI should evolve to include:
+- `--video-file /path/to/file.mp4`
+- existing `--video-url`
+- existing `--channel-url`
 
 ---
 
-## 10. Security and Compliance Notes
-
-- Treat transcripts as third-party content; keep usage within user’s legal/policy boundaries.
-- Keep API keys in environment variables; never in repo files.
-- Log minimally; avoid leaking secrets in run reports.
-
----
-
-## 11. Testing Strategy
+## 13. Testing Strategy
 
 1. Unit tests
-- VTT parse/render behavior.
-- New-video detection/idempotency.
-- Cleanup guardrails (no summary/invention prompt contract).
+- transcript JSON normalization from VTT/ASR segments
+- source identifier generation for local files vs YouTube
+- frame manifest generation and path formatting
 
 2. Integration tests
-- Mocked yt-dlp adapter end-to-end run.
-- SQLite state transitions across two consecutive runs.
+- single-video YouTube path with mocked adapters
+- local-file path with sidecar subtitle or mocked ASR
+- run summary and idempotency across transcript + frame artifacts
 
 3. Test As Lee
-- Run CLI manually against one known channel.
-- Validate outputs in `data/videos/<video_id>/`.
-- Re-run and confirm zero duplicates.
+- run a YouTube video target end-to-end
+- run a local `.mp4` end-to-end
+- confirm transcript files, `transcript.json`, frame files, `frame_manifest.json`, and `tutorial_asset_bundle.json` exist
 
 ---
 
-## 12. Implementation Plan (Slices)
+## 14. Implementation Plan
 
-## Slice 1: Exact Transcript MVP
-- Normalize package path to `lunduke_transcripts`.
-- Implement config + orchestrator + yt-dlp adapter + SQLite state.
-- Implement optional `--from/--to` published-date filters.
-- Write metadata and exact transcript outputs.
+### Slice 1: Source-Agnostic Transcript Extraction
+- add local file target model and CLI/config support
+- generalize video metadata model to source-aware records
+- write `transcript.json`
 
-## Slice 2: Cleanup Pass
-- Add LLM adapter with provider abstraction.
-- Add clean transcript generation and persistence.
-- Add cleanup provenance in metadata.
+### Slice 2: Frame Candidate Extraction
+- add media access path for frame extraction
+- implement `video_frame_extractor.py`
+- write frame files and `frame_manifest.json`
 
-## Slice 3: Scheduling + Hardening
-- Add scheduler docs/scripts.
-- Add retries, richer run reports, and operational logging.
-- Expand multi-channel ergonomics.
-
----
-
-## 13. Open Decisions
-
-1. Default cleanup model and max token budget.
-2. How aggressive disfluency cleanup should be.
-3. Whether to keep both `.md` and `.txt` cleaned outputs in MVP.
-4. Maximum safe default backfill window for first run (if user sets no date range).
+### Slice 3: Bundle Assembly
+- write `tutorial_asset_bundle.json`
+- persist references in SQLite and run reports
+- document the stable JSON contracts for future renderers
 
 ---
 
-Last updated: 2026-03-04
+## 15. Open Decisions
+
+1. Whether local files should prefer sidecar subtitle files before ASR.
+2. Whether frame extraction should capture all candidates or cap them by default.
+3. Whether the first bundle should include only scene candidates or also transcript-aligned selections.
+4. How aggressive semantic frame selection should be once scene candidates exist.
+
+---
+
+Last updated: 2026-03-06

@@ -13,7 +13,203 @@
 
 Assumptions:
 - Sprint length: 1 week (adjustable)
-- Priority: harden compatibility, reliability, and reproducibility for production use
+- Priority: source-agnostic transcript extraction and reusable frame asset generation
+
+---
+
+## Sprint 9 — Tutorial PDF Rendering
+
+**Status**: ✅ Completed (2026-03-06)  
+**Goal**: Render published Markdown tutorials into HTML/PDF with explicit screenshot validation and render provenance.
+
+### Scope
+
+- [x] Add a downstream `render` CLI command that consumes `tutorial_manifest.json`
+- [x] Add image validation for Markdown screenshot references before render
+- [x] Add Pandoc-driven HTML rendering from `tutorial_final.md`
+- [x] Add Chrome-family PDF rendering from generated HTML
+- [x] Add `render_manifest.json` with toolchain, image validation, and output status
+- [x] Add tests for:
+  - successful HTML/PDF render
+  - missing-image failure
+  - missing tutorial markdown failure
+  - repeatable reruns
+  - render CLI behavior
+- [x] Update README and sample config for renderer settings
+
+### Delivery Notes
+
+- Markdown remains the canonical authored tutorial artifact.
+- PDF rendering is a separate downstream step and never reruns tutorial generation.
+- Screenshot preservation is a hard requirement: missing image references fail the render before Pandoc/PDF generation runs.
+- The renderer clears stale HTML/PDF outputs before each attempt so failed renders do not look successful.
+- On macOS, the PDF backend prefers Google Chrome when available because Chromium may not exit cleanly after printing headless PDFs.
+
+### Acceptance Criteria
+
+1. User can render a published tutorial manifest into HTML/PDF with one CLI command.
+2. Missing tutorial images fail the render with a clear machine-readable manifest.
+3. Render outputs live under the tutorial directory beside `tutorial_final.md`.
+4. Lint/format/tests pass and Test As Lee passes on a real tutorial directory.
+
+---
+
+## Sprint 8 — Multi-Agent Tutorial Generation
+
+**Status**: ✅ Completed (2026-03-06)  
+**Goal**: Turn `tutorial_asset_bundle.json` into an approval-gated written tutorial workflow with role-based agents, reusable skills, validation, review, and revision artifacts.
+
+### Scope
+
+- [x] Add a downstream `tutorial` CLI command that consumes `tutorial_asset_bundle.json`
+- [x] Add repo-local tutorial agent role files under `agents/`
+- [x] Add repo-local tutorial skills under `skills/`
+- [x] Add tutorial pipeline stages for:
+  - definition of done
+  - planning
+  - evidence mapping
+  - visual selection
+  - drafting
+  - validation
+  - technical review
+  - adversarial review
+  - review response
+- [x] Add outline approval gate before drafting continues
+- [x] Add `tutorial_definition.json`, `lesson_outline.json`, `evidence_map.json`, `frame_selection_plan.json`
+- [x] Add `tutorial_validation_report.json`, `technical_review_report.json`, `adversarial_review_report.json`, `tutorial_revision_plan.json`
+- [x] Add `tutorial_manifest.json` with agent/skill digests and review outcomes
+- [x] Add `tutorial_final.md` when the tutorial clears the gate
+- [x] Add cache reuse keyed by bundle contents plus agent/skill versions
+- [x] Add tests for approval gating, blocking review paths, reroute behavior, text-only validation, CLI behavior, and cache invalidation
+
+### Delivery Notes
+
+- The tutorial pipeline is downstream-only and never reruns transcript or frame extraction.
+- A first tutorial run stops at `awaiting_outline_approval` until the human reruns with `--approve-outline`.
+- Adversarial review is mandatory before `tutorial_final.md` becomes publish-eligible.
+- Prompt behavior now lives in repo-local `agents/` and tutorial-specific `skills/`, while orchestration stays in Python.
+
+### Acceptance Criteria
+
+1. User can generate an outline package from `tutorial_asset_bundle.json` with one CLI command.
+2. Drafting does not continue until the outline is explicitly approved.
+3. Review artifacts are written in machine-readable form before publish.
+4. Prompt/skill changes are visible in `tutorial_manifest.json`.
+5. Re-running with unchanged bundle and unchanged agent/skill files reuses cached outputs.
+6. Lint/format/tests pass and Test As Lee passes.
+
+---
+
+## Sprint 7 — Tutorial Asset Extraction Foundation
+
+**Status**: ✅ Completed with Closeout Remediation (2026-03-06)  
+**Goal**: Produce a stable, source-agnostic data package for later tutorial generation by adding transcript JSON, frame candidate extraction, and bundle manifests.
+
+### Scope
+
+- [x] Add source-agnostic ingest support for local video files alongside YouTube video targets
+- [x] Generalize source/video models and storage keys to support `youtube_video` and `local_file`
+- [x] Add canonical `transcript.json` artifact with normalized segment timing and provenance
+- [x] Add frame candidate extraction using `ffmpeg` scene detection
+- [x] Write frame files under per-video `frames/` directories
+- [x] Add `frame_manifest.json` referencing frame files and extraction metadata
+- [x] Add `tutorial_asset_bundle.json` referencing transcript, frame, and metadata artifacts
+- [x] Add config/CLI support for local files:
+  - `[[files]]` targets
+  - `--video-file`
+- [x] Add tests for:
+  - local file config parsing
+  - transcript JSON generation
+  - frame manifest generation
+  - idempotent reruns with transcript + frame artifacts
+- [x] Update README and sample config for the canonical asset bundle workflow
+
+### Delivery Notes
+
+- Local media files can now be processed through `--video-file` and `[[files]]`.
+- Successful runs write `transcript.json`, `frame_manifest.json`, and `tutorial_asset_bundle.json`.
+- Missing local file inputs are surfaced as failed runs instead of silent no-op success.
+- Manual validation passed using a real local `.mp4` plus sidecar `.vtt`, followed by an idempotent rerun.
+- `tutorial_asset_bundle.json` now records `frame_capture.status` and any extraction error whenever `transcript.json` exists.
+- Frame extraction now stages into a temporary directory before replacing `frames/`.
+- Local media IDs are locked to content fingerprints and covered by regression tests.
+
+### Closeout Remediation
+
+- [x] Make frame extraction failures visible in canonical bundle output and run status
+- [x] Make frame extraction replace `frames/` atomically so failed reruns do not destroy prior assets
+- [x] Lock local file IDs to stable content fingerprints with regression coverage
+- [x] Record the extraction design decisions in `architecture.md`
+
+### Acceptance Criteria
+
+1. User can process either a YouTube video URL or a local `.mp4` file with one CLI.
+2. Successful runs write exact transcript artifacts plus `transcript.json`.
+3. Successful runs write frame image files to disk plus `frame_manifest.json`.
+4. `tutorial_asset_bundle.json` references artifact files rather than embedding image data.
+5. Existing run reporting and idempotency semantics remain intact.
+6. Lint/format/tests pass.
+
+---
+
+## Sprint 6 — ASR Plugin Architecture (Productionizing Caption Fallback)
+
+**Status**: ✅ Completed (2026-03-05)  
+**Goal**: Add production-ready transcript fallback using pluggable ASR providers, with `fast-whisper` as the first implementation.
+
+### Scope
+
+- [x] Add ASR plugin contract + provider registry
+- [x] Implement `fast-whisper` provider plugin
+- [x] Add ASR app config options (`enable_asr_fallback`, provider/model/device, ffmpeg)
+- [x] Add single-video clip options (`clip_start`, `clip_end`, `force_asr`) in config
+- [x] Integrate fallback path in `SingleVideoTranscriber`:
+  - captions first, ASR fallback when unavailable
+  - optional force-ASR mode
+  - optional clip transcription
+- [x] Persist ASR metadata/artifacts and run-item statuses
+- [x] Add CLI runtime overrides (`--asr-fallback`, `--force-asr`, `--clip-start`, `--clip-end`)
+- [x] Add tests for plugin registry, config parsing, and fallback behavior
+- [x] Update README and config examples
+
+### Acceptance Criteria
+
+1. If captions are unavailable and ASR fallback is enabled, exact transcript artifacts are still produced via ASR.
+2. `fast-whisper` is an implementation behind a swap-friendly plugin interface (no orchestrator changes needed for future providers).
+3. Single-video targets can define clip bounds and force-ASR behavior.
+4. Pipeline remains idempotent and existing run/report behavior remains intact.
+5. Lint/format/tests pass.
+
+---
+
+## Sprint 5 — Core Refactor (Single Video + Wrapper)
+
+**Status**: ✅ Completed (2026-03-04)  
+**Goal**: Separate per-video transcription into a dedicated service and keep channel processing as a wrapper orchestration layer with unified channel/video target config.
+
+### Scope
+
+- [x] Add `SingleVideoTranscriber` service for one-video end-to-end processing
+- [x] Refactor `Orchestrator` to use wrapper + single-video service split
+- [x] Add config support for explicit single-video targets (`[[videos]]`) in addition to `[[channels]]`
+- [x] Add CLI target options:
+  - `--channel-url` (repeatable)
+  - `--video-url` (repeatable)
+  - keep `--url` for backward compatibility
+- [x] Keep existing date-range and idempotency semantics for all target types
+- [x] Add tests for:
+  - config parsing with `[[videos]]`
+  - CLI target flag merging behavior
+  - orchestrator wrapper invoking single-video processor correctly
+- [x] Update docs with new target configuration examples
+
+### Acceptance Criteria
+
+1. User can run single-video mode and channel mode through one CLI.
+2. Config file can define both channel and single-video targets.
+3. Channel runs still respect `--from/--to` and `--reprocess`.
+4. Existing output schema/artifact naming remains stable.
+5. Test suite passes after refactor.
 
 ---
 
@@ -164,4 +360,4 @@ Done checklist for each completed work unit:
 
 ---
 
-Last updated: 2026-03-04
+Last updated: 2026-03-06

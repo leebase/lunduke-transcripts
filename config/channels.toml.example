@@ -9,6 +9,22 @@ yt_dlp_timeout_seconds = 120
 fetch_retries = 2
 retry_backoff_seconds = 2
 max_videos_per_channel = 40
+enable_asr_fallback = false
+force_asr = false
+asr_provider = "fast-whisper"
+asr_model = "small.en"
+asr_device = "auto"
+asr_compute_type = "auto"
+ffmpeg_binary = "ffmpeg"
+ffprobe_binary = "ffprobe"
+ffmpeg_timeout_seconds = 300
+keep_audio_files = false
+frame_capture_enabled = true
+frame_capture_threshold = 0.25
+frame_image_format = "jpg"
+pandoc_binary = "pandoc"
+pdf_engine = "chromium"
+pdf_engine_binary = "chromium"
 
 [llm]
 provider = "openrouter"
@@ -22,3 +38,19 @@ retry_backoff_seconds = 2
 name = "Example Journalist"
 url = "https://www.youtube.com/@example/videos"
 language = "en"
+
+[[videos]]
+name = "Example Single Video"
+url = "https://www.youtube.com/watch?v=VIDEO_ID"
+language = "en"
+clip_start = "00:30:40"
+clip_end = "01:12:35"
+force_asr = true
+
+[[files]]
+name = "Example Local Video"
+path = "/absolute/path/to/demo.mp4"
+language = "en"
+clip_start = "00:00:00"
+clip_end = "00:05:00"
+force_asr = false

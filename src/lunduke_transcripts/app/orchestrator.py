@@ -1,44 +1,33 @@
-"""End-to-end pipeline orchestration."""
+"""End-to-end orchestration wrapper for channel/video targets."""
 
 from __future__ import annotations
 
-import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from lunduke_transcripts.app.single_video_transcriber import SingleVideoTranscriber
 from lunduke_transcripts.config import Config
 from lunduke_transcripts.domain.models import RunOptions, RunSummary
+from lunduke_transcripts.infra.asr_plugins.base import ASRPlugin
 from lunduke_transcripts.infra.llm_adapter import LLMAdapter
+from lunduke_transcripts.infra.local_media_adapter import LocalMediaAdapter
 from lunduke_transcripts.infra.storage import Storage
+from lunduke_transcripts.infra.video_frame_extractor import VideoFrameExtractor
 from lunduke_transcripts.infra.youtube_adapter import YtDlpAdapter
-from lunduke_transcripts.transforms.vtt_parser import (
-    parse_vtt,
-    render_plain_text,
-    render_timestamped_markdown,
-)
 
 
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _in_range(
-    published_at: datetime | None, from_utc: datetime | None, to_utc: datetime | None
-) -> bool:
-    if from_utc is None and to_utc is None:
-        return True
-    if published_at is None:
-        return False
-    if from_utc and published_at < from_utc:
-        return False
-    if to_utc and published_at > to_utc:
-        return False
-    return True
+@dataclass(frozen=True)
+class TargetSettings:
+    language: str
+    clip_start: str | None = None
+    clip_end: str | None = None
+    force_asr: bool | None = None
 
 
 class Orchestrator:
-    """Coordinates discovery, extraction, cleanup, and persistence."""
+    """Coordinates discovery, filtering, per-video processing, and run reporting."""
 
     def __init__(
         self,
@@ -46,11 +35,26 @@ class Orchestrator:
         storage: Storage,
         youtube: YtDlpAdapter,
         llm: LLMAdapter,
+        asr_plugin: ASRPlugin | None = None,
+        local_media: LocalMediaAdapter | None = None,
+        frame_extractor: VideoFrameExtractor | None = None,
     ) -> None:
         self.config = config
         self.storage = storage
         self.youtube = youtube
         self.llm = llm
+        self.asr_plugin = asr_plugin
+        self.local_media = local_media or LocalMediaAdapter(
+            ffmpeg_binary=config.app.ffmpeg_binary,
+            ffprobe_binary=config.app.ffprobe_binary,
+            ffmpeg_timeout_seconds=config.app.ffmpeg_timeout_seconds,
+        )
+        self.frame_extractor = frame_extractor or VideoFrameExtractor(
+            ffmpeg_binary=config.app.ffmpeg_binary,
+            threshold=config.app.frame_capture_threshold,
+            image_format=config.app.frame_image_format,
+            timeout_seconds=config.app.ffmpeg_timeout_seconds,
+        )
 
     def run(self, options: RunOptions) -> RunSummary:
         self.storage.initialize()
@@ -60,9 +64,27 @@ class Orchestrator:
         cleanup_enabled = self.config.app.enable_cleanup
         article_enabled = self.config.app.enable_article or options.generate_article
         llm_enabled = bool(getattr(self.llm, "is_enabled", lambda: True)())
+        processor = SingleVideoTranscriber(
+            storage=self.storage,
+            youtube=self.youtube,
+            llm=self.llm,
+            llm_prompt_version=self.config.llm.prompt_version,
+            asr_plugin=self.asr_plugin,
+            local_media=self.local_media,
+            frame_extractor=self.frame_extractor,
+            enable_asr_fallback=self.config.app.enable_asr_fallback,
+            force_asr=self.config.app.force_asr,
+            keep_audio_files=self.config.app.keep_audio_files,
+            enable_frame_capture=self.config.app.frame_capture_enabled,
+            frame_capture_threshold=self.config.app.frame_capture_threshold,
+            frame_image_format=self.config.app.frame_image_format,
+        )
 
         try:
             discovered_video_ids: set[str] = set()
+            target_settings: dict[str, TargetSettings] = {}
+            discovery_failures = 0
+
             for channel in self.config.channels:
                 discovered = self.youtube.list_videos(
                     channel.url, max_items=self.config.app.max_videos_per_channel
@@ -71,6 +93,9 @@ class Orchestrator:
                 for video in discovered:
                     self.storage.upsert_video(video)
                     discovered_video_ids.add(video.video_id)
+                    target_settings[video.video_id] = TargetSettings(
+                        language=(channel.language or self.config.app.default_language),
+                    )
                 self.storage.log_run_item(
                     run_id,
                     video_id=None,
@@ -79,21 +104,74 @@ class Orchestrator:
                     message=f"{channel.name}: discovered={len(discovered)}",
                 )
 
-            candidates = self.storage.list_candidates(
-                channel_urls=[c.url for c in self.config.channels],
-                video_ids=sorted(discovered_video_ids),
-                filter_from=options.from_utc,
-                filter_to=options.to_utc,
-                reprocess=options.reprocess,
-            )
+            for video_target in self.config.videos:
+                discovered = self.youtube.list_videos(video_target.url, max_items=1)
+                videos_seen += len(discovered)
+                for video in discovered:
+                    self.storage.upsert_video(video)
+                    discovered_video_ids.add(video.video_id)
+                    target_settings[video.video_id] = TargetSettings(
+                        language=(
+                            video_target.language or self.config.app.default_language
+                        ),
+                        clip_start=video_target.clip_start,
+                        clip_end=video_target.clip_end,
+                        force_asr=video_target.force_asr,
+                    )
+                self.storage.log_run_item(
+                    run_id,
+                    video_id=None,
+                    step="discover",
+                    status="ok",
+                    message=f"{video_target.name}: discovered={len(discovered)}",
+                )
+
+            for file_target in self.config.files:
+                try:
+                    record = self.local_media.probe_video(Path(file_target.path))
+                    self.storage.upsert_video(record)
+                    discovered_video_ids.add(record.video_id)
+                    target_settings[record.video_id] = TargetSettings(
+                        language=(
+                            file_target.language or self.config.app.default_language
+                        ),
+                        clip_start=file_target.clip_start,
+                        clip_end=file_target.clip_end,
+                        force_asr=file_target.force_asr,
+                    )
+                    videos_seen += 1
+                    self.storage.log_run_item(
+                        run_id,
+                        video_id=record.video_id,
+                        step="discover",
+                        status="ok",
+                        message=f"{file_target.name}: discovered=1",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    discovery_failures += 1
+                    failures.append({"video_id": file_target.path, "error": str(exc)})
+                    self.storage.log_run_item(
+                        run_id,
+                        video_id=None,
+                        step="discover",
+                        status="error",
+                        message=f"{file_target.name}: {exc}",
+                    )
+
+            if discovered_video_ids:
+                candidates = self.storage.list_candidates(
+                    channel_urls=None,
+                    video_ids=sorted(discovered_video_ids),
+                    filter_from=options.from_utc,
+                    filter_to=options.to_utc,
+                    reprocess=options.reprocess,
+                )
+            else:
+                candidates = []
+
             videos_new = 0
             videos_processed = 0
             videos_failed = 0
-
-            lang_by_channel_url = {
-                c.url: (c.language or self.config.app.default_language)
-                for c in self.config.channels
-            }
 
             if (cleanup_enabled or article_enabled) and not llm_enabled:
                 self.storage.log_run_item(
@@ -105,158 +183,35 @@ class Orchestrator:
                 )
 
             for candidate in candidates:
-                try:
-                    detailed = self.youtube.fetch_video_metadata(
-                        candidate.video_url, fallback=candidate
-                    )
-                    self.storage.upsert_video(detailed)
-                    if not _in_range(
-                        detailed.published_at, options.from_utc, options.to_utc
-                    ):
-                        self.storage.log_run_item(
-                            run_id,
-                            video_id=detailed.video_id,
-                            step="filter",
-                            status="skipped",
-                            message="outside_date_range_or_missing_publish_time",
-                        )
-                        continue
+                settings = target_settings.get(
+                    candidate.video_id,
+                    TargetSettings(language=self.config.app.default_language),
+                )
+                result = processor.process(
+                    run_id=run_id,
+                    candidate=candidate,
+                    options=options,
+                    language=settings.language,
+                    cleanup_enabled=cleanup_enabled,
+                    article_enabled=article_enabled,
+                    llm_enabled=llm_enabled,
+                    clip_start=settings.clip_start,
+                    clip_end=settings.clip_end,
+                    force_asr=settings.force_asr,
+                )
+                if result.count_new:
                     videos_new += 1
-                    language = lang_by_channel_url.get(
-                        detailed.channel_url, self.config.app.default_language
-                    )
-                    transcript = self.youtube.fetch_transcript(
-                        detailed.video_url, detailed.video_id, language
-                    )
-
-                    clean_path: Path | None = None
-                    clean_model: str | None = None
-                    clean_prompt_version: str | None = None
-                    article_path: Path | None = None
-                    article_model: str | None = None
-                    article_prompt_version: str | None = None
-                    exact_hash: str | None = None
-                    exact_vtt_path: Path | None = None
-                    exact_text_path: Path | None = None
-
-                    self.storage.write_video_metadata(
-                        detailed,
-                        transcript_source=transcript.source_type,
-                        language=transcript.language,
-                    )
-
-                    if transcript.vtt_text:
-                        cues = parse_vtt(transcript.vtt_text)
-                        exact_vtt_path = self.storage.write_video_artifact(
-                            detailed.video_id,
-                            "transcript_exact.vtt",
-                            transcript.vtt_text,
-                        )
-                        exact_md = render_timestamped_markdown(cues)
-                        exact_txt = render_plain_text(cues)
-                        self.storage.write_video_artifact(
-                            detailed.video_id, "transcript_exact.md", exact_md
-                        )
-                        exact_text_path = self.storage.write_video_artifact(
-                            detailed.video_id, "transcript_exact.txt", exact_txt
-                        )
-                        exact_hash = _sha256(transcript.vtt_text)
-
-                        if cleanup_enabled and llm_enabled:
-                            try:
-                                cached = self.storage.find_clean_text_by_hash(
-                                    exact_hash
-                                )
-                                if cached is not None:
-                                    clean_text = cached
-                                    clean_model = "cache"
-                                    clean_prompt_version = (
-                                        self.config.llm.prompt_version
-                                    )
-                                else:
-                                    clean_text, clean_model, clean_prompt_version = (
-                                        self.llm.clean_transcript(exact_txt)
-                                    )
-                                clean_path = self.storage.write_video_artifact(
-                                    detailed.video_id, "transcript_clean.md", clean_text
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                self.storage.log_run_item(
-                                    run_id,
-                                    video_id=detailed.video_id,
-                                    step="clean",
-                                    status="error",
-                                    message=str(exc),
-                                )
-
-                        if article_enabled and llm_enabled:
-                            try:
-                                (
-                                    article_text,
-                                    article_model,
-                                    article_prompt_version,
-                                ) = self.llm.write_news_article(
-                                    exact_md, detailed.title
-                                )
-                                article_path = self.storage.write_video_artifact(
-                                    detailed.video_id, "news_article.md", article_text
-                                )
-                                article_meta = {
-                                    "model": article_model,
-                                    "prompt_version": article_prompt_version,
-                                    "source": "transcript_exact.md",
-                                    "video_id": detailed.video_id,
-                                    "title": detailed.title,
-                                }
-                                self.storage.write_video_artifact(
-                                    detailed.video_id,
-                                    "news_article_metadata.json",
-                                    json.dumps(article_meta, indent=2, sort_keys=True)
-                                    + "\n",
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                self.storage.log_run_item(
-                                    run_id,
-                                    video_id=detailed.video_id,
-                                    step="article",
-                                    status="error",
-                                    message=str(exc),
-                                )
-
-                    self.storage.upsert_transcript(
-                        video_id=detailed.video_id,
-                        language=transcript.language,
-                        source_type=transcript.source_type,
-                        exact_hash=exact_hash,
-                        exact_path=exact_vtt_path,
-                        exact_text_path=exact_text_path,
-                        clean_path=clean_path,
-                        clean_model=clean_model,
-                        clean_prompt_version=clean_prompt_version,
-                        article_path=article_path,
-                        article_model=article_model,
-                        article_prompt_version=article_prompt_version,
-                    )
-                    self.storage.log_run_item(
-                        run_id,
-                        video_id=detailed.video_id,
-                        step="write",
-                        status="ok",
-                        message=transcript.source_type,
-                    )
+                if result.processed:
                     videos_processed += 1
-                except Exception as exc:  # noqa: BLE001
+                if result.failed:
                     videos_failed += 1
-                    failures.append({"video_id": candidate.video_id, "error": str(exc)})
-                    self.storage.log_run_item(
-                        run_id,
-                        video_id=candidate.video_id,
-                        step="process",
-                        status="error",
-                        message=str(exc),
-                    )
+                    if result.failure is not None:
+                        failures.append(result.failure)
 
-            status = "partial" if videos_failed else "success"
+            total_failed = videos_failed + discovery_failures
+            status = "success"
+            if total_failed:
+                status = "failed" if videos_processed == 0 else "partial"
             error_summary = (
                 json.dumps(failures, ensure_ascii=True) if failures else None
             )
@@ -266,7 +221,7 @@ class Orchestrator:
                 videos_seen=videos_seen,
                 videos_new=videos_new,
                 videos_processed=videos_processed,
-                videos_failed=videos_failed,
+                videos_failed=total_failed,
                 error_summary=error_summary,
             )
             self.storage.write_run_report(run_id)
@@ -278,7 +233,7 @@ class Orchestrator:
                 videos_seen=videos_seen,
                 videos_new=videos_new,
                 videos_processed=videos_processed,
-                videos_failed=videos_failed,
+                videos_failed=total_failed,
                 failures=failures,
             )
         finally:

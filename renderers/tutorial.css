@@ -1,0 +1,70 @@
+@page {
+  margin: 0.7in;
+}
+
+html {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1f1f1f;
+  line-height: 1.5;
+}
+
+body {
+  font-size: 12pt;
+  margin: 0 auto;
+  max-width: 7.2in;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: #111111;
+  page-break-after: avoid;
+}
+
+h1 {
+  border-bottom: 2px solid #d0d0d0;
+  margin-bottom: 0.6em;
+  padding-bottom: 0.2em;
+}
+
+h2,
+h3 {
+  margin-top: 1.2em;
+}
+
+p,
+ul,
+ol,
+pre,
+blockquote {
+  margin: 0.7em 0;
+}
+
+img {
+  display: block;
+  height: auto;
+  margin: 0.8em auto;
+  max-width: 100%;
+  page-break-inside: avoid;
+}
+
+pre,
+code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+}
+
+pre {
+  background: #f7f7f7;
+  border: 1px solid #dddddd;
+  overflow-wrap: anywhere;
+  padding: 0.8em;
+  white-space: pre-wrap;
+}
+
+blockquote {
+  border-left: 4px solid #c9c9c9;
+  color: #444444;
+  margin-left: 0;
+  padding-left: 1em;
+}

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import time
 from typing import Any
 
@@ -127,23 +129,76 @@ class LLMAdapter:
             ) from last_error
         raise RuntimeError(f"llm_request_failed: {last_error}") from last_error
 
+    def run_text_task(
+        self, *, task_name: str, system_prompt: str, user_prompt: str
+    ) -> tuple[str, str, str]:
+        """Run a generic text task and return text plus provenance."""
+
+        _ = task_name
+        text = self._run_prompt(system_prompt=system_prompt, user_prompt=user_prompt)
+        return text, self.model, self.prompt_version
+
+    def run_json_task(
+        self, *, task_name: str, system_prompt: str, user_prompt: str
+    ) -> tuple[dict[str, Any], str, str]:
+        """Run a generic JSON task and parse the model output."""
+
+        text, model, prompt_version = self.run_text_task(
+            task_name=task_name,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        try:
+            return _parse_json_response(text), model, prompt_version
+        except ValueError as exc:
+            raise RuntimeError(f"llm_invalid_json[{task_name}]: {exc}") from exc
+
     def clean_transcript(self, exact_transcript: str) -> tuple[str, str, str]:
         """Return cleaned transcript text and provenance."""
 
-        cleaned = self._run_prompt(
+        cleaned, model, prompt_version = self.run_text_task(
+            task_name="transcript-cleanup",
             system_prompt=SYSTEM_PROMPT,
             user_prompt=build_cleanup_prompt(exact_transcript),
         )
-        return cleaned, self.model, self.prompt_version
+        return cleaned, model, prompt_version
 
     def write_news_article(
         self, exact_markdown_transcript: str, video_title: str | None
     ) -> tuple[str, str, str]:
         """Generate a faithful news-style article with paragraph timestamps."""
 
-        article = self._run_prompt(
+        article, model, prompt_version = self.run_text_task(
+            task_name="news-article",
             system_prompt=ARTICLE_SYSTEM_PROMPT,
             user_prompt=build_article_prompt(exact_markdown_transcript, video_title),
         )
         article = normalize_article_timestamps(article)
-        return article, self.model, self.prompt_version
+        return article, model, prompt_version
+
+
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(?P<body>.*?)```", re.DOTALL)
+
+
+def _parse_json_response(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    candidates = [stripped]
+    for match in _JSON_BLOCK_RE.finditer(stripped):
+        candidates.append(match.group("body").strip())
+
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidates.append(stripped[first_brace : last_brace + 1])
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+        raise ValueError("expected JSON object response")
+    raise ValueError("could not parse model response as JSON object")

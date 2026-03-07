@@ -23,6 +23,22 @@ class AppConfig:
     fetch_retries: int = 2
     retry_backoff_seconds: int = 2
     max_videos_per_channel: int | None = None
+    enable_asr_fallback: bool = False
+    force_asr: bool = False
+    asr_provider: str = "fast-whisper"
+    asr_model: str = "small.en"
+    asr_device: str = "auto"
+    asr_compute_type: str = "auto"
+    ffmpeg_binary: str = "ffmpeg"
+    ffprobe_binary: str = "ffprobe"
+    ffmpeg_timeout_seconds: int = 300
+    keep_audio_files: bool = False
+    frame_capture_enabled: bool = True
+    frame_capture_threshold: float = 0.25
+    frame_image_format: str = "jpg"
+    pandoc_binary: str = "pandoc"
+    pdf_engine: str = "chromium"
+    pdf_engine_binary: str = "chromium"
 
 
 @dataclass(frozen=True)
@@ -47,12 +63,38 @@ class ChannelConfig:
 
 
 @dataclass(frozen=True)
+class VideoConfig:
+    """Single video source configuration."""
+
+    name: str
+    url: str
+    language: str | None = None
+    clip_start: str | None = None
+    clip_end: str | None = None
+    force_asr: bool | None = None
+
+
+@dataclass(frozen=True)
+class FileConfig:
+    """Local file source configuration."""
+
+    name: str
+    path: str
+    language: str | None = None
+    clip_start: str | None = None
+    clip_end: str | None = None
+    force_asr: bool | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     """Top-level app configuration."""
 
     app: AppConfig = field(default_factory=AppConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     channels: list[ChannelConfig] = field(default_factory=list)
+    videos: list[VideoConfig] = field(default_factory=list)
+    files: list[FileConfig] = field(default_factory=list)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -70,6 +112,19 @@ def _parse_bool(raw: str | bool | None, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _parse_optional_bool(raw: str | bool | None) -> bool | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def load_env_file(path: str | Path = ".env") -> None:
@@ -94,6 +149,8 @@ def _build_config(
     app_raw: dict[str, Any],
     llm_raw: dict[str, Any],
     channels_raw: list[dict[str, Any]],
+    videos_raw: list[dict[str, Any]],
+    files_raw: list[dict[str, Any]],
 ) -> Config:
     app = AppConfig(
         data_dir=Path(app_raw.get("data_dir", "data")),
@@ -120,6 +177,60 @@ def _build_config(
             int(app_raw["max_videos_per_channel"])
             if app_raw.get("max_videos_per_channel") is not None
             else None
+        ),
+        enable_asr_fallback=_parse_bool(
+            os.getenv("ENABLE_ASR_FALLBACK"),
+            _parse_bool(app_raw.get("enable_asr_fallback"), False),
+        ),
+        force_asr=_parse_bool(
+            os.getenv("FORCE_ASR"),
+            _parse_bool(app_raw.get("force_asr"), False),
+        ),
+        asr_provider=str(
+            os.getenv("ASR_PROVIDER", app_raw.get("asr_provider", "fast-whisper"))
+        ),
+        asr_model=str(os.getenv("ASR_MODEL", app_raw.get("asr_model", "small.en"))),
+        asr_device=str(os.getenv("ASR_DEVICE", app_raw.get("asr_device", "auto"))),
+        asr_compute_type=str(
+            os.getenv("ASR_COMPUTE_TYPE", app_raw.get("asr_compute_type", "auto"))
+        ),
+        ffmpeg_binary=str(app_raw.get("ffmpeg_binary", "ffmpeg")),
+        ffprobe_binary=str(app_raw.get("ffprobe_binary", "ffprobe")),
+        ffmpeg_timeout_seconds=int(
+            app_raw.get(
+                "ffmpeg_timeout_seconds",
+                os.getenv("FFMPEG_TIMEOUT_SECONDS", 300),
+            )
+        ),
+        keep_audio_files=_parse_bool(
+            os.getenv("KEEP_AUDIO_FILES"),
+            _parse_bool(app_raw.get("keep_audio_files"), False),
+        ),
+        frame_capture_enabled=_parse_bool(
+            os.getenv("FRAME_CAPTURE_ENABLED"),
+            _parse_bool(app_raw.get("frame_capture_enabled"), True),
+        ),
+        frame_capture_threshold=float(
+            app_raw.get(
+                "frame_capture_threshold",
+                os.getenv("FRAME_CAPTURE_THRESHOLD", 0.25),
+            )
+        ),
+        frame_image_format=str(
+            app_raw.get(
+                "frame_image_format",
+                os.getenv("FRAME_IMAGE_FORMAT", "jpg"),
+            )
+        ),
+        pandoc_binary=str(
+            os.getenv("PANDOC_BINARY", app_raw.get("pandoc_binary", "pandoc"))
+        ),
+        pdf_engine=str(os.getenv("PDF_ENGINE", app_raw.get("pdf_engine", "chromium"))),
+        pdf_engine_binary=str(
+            os.getenv(
+                "PDF_ENGINE_BINARY",
+                app_raw.get("pdf_engine_binary", "chromium"),
+            )
         ),
     )
 
@@ -156,13 +267,80 @@ def _build_config(
                 language=str(item["language"]) if item.get("language") else None,
             )
         )
-    return Config(app=app, llm=llm, channels=channels)
+
+    videos: list[VideoConfig] = []
+    for idx, item in enumerate(videos_raw, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"videos[{idx}] must be a table")
+        name = item.get("name")
+        url = item.get("url")
+        if not name or not url:
+            raise ValueError(f"videos[{idx}] must include non-empty `name` and `url`")
+        videos.append(
+            VideoConfig(
+                name=str(name),
+                url=str(url),
+                language=str(item["language"]) if item.get("language") else None,
+                clip_start=(
+                    str(item["clip_start"]).strip()
+                    if item.get("clip_start") is not None
+                    else None
+                ),
+                clip_end=(
+                    str(item["clip_end"]).strip()
+                    if item.get("clip_end") is not None
+                    else None
+                ),
+                force_asr=_parse_optional_bool(item.get("force_asr")),
+            )
+        )
+
+    files: list[FileConfig] = []
+    for idx, item in enumerate(files_raw, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"files[{idx}] must be a table")
+        name = item.get("name")
+        path = item.get("path")
+        if not name or not path:
+            raise ValueError(f"files[{idx}] must include non-empty `name` and `path`")
+        files.append(
+            FileConfig(
+                name=str(name),
+                path=str(path),
+                language=str(item["language"]) if item.get("language") else None,
+                clip_start=(
+                    str(item["clip_start"]).strip()
+                    if item.get("clip_start") is not None
+                    else None
+                ),
+                clip_end=(
+                    str(item["clip_end"]).strip()
+                    if item.get("clip_end") is not None
+                    else None
+                ),
+                force_asr=_parse_optional_bool(item.get("force_asr")),
+            )
+        )
+
+    return Config(
+        app=app,
+        llm=llm,
+        channels=channels,
+        videos=videos,
+        files=files,
+    )
 
 
 def default_config_from_env() -> Config:
     """Build configuration defaults using environment overrides."""
 
-    return _build_config(app_raw={}, llm_raw={}, channels_raw=[])
+    return _build_config(
+        app_raw={},
+        llm_raw={},
+        channels_raw=[],
+        videos_raw=[],
+        files_raw=[],
+    )
 
 
 def load_config(path: str | Path) -> Config:
@@ -175,6 +353,18 @@ def load_config(path: str | Path) -> Config:
     app_raw = _as_dict(raw.get("app"))
     llm_raw = _as_dict(raw.get("llm"))
     channels_raw = raw.get("channels", [])
+    videos_raw = raw.get("videos", [])
+    files_raw = raw.get("files", [])
     if not isinstance(channels_raw, list):
         raise ValueError("`channels` must be an array of tables in TOML config")
-    return _build_config(app_raw=app_raw, llm_raw=llm_raw, channels_raw=channels_raw)
+    if not isinstance(videos_raw, list):
+        raise ValueError("`videos` must be an array of tables in TOML config")
+    if not isinstance(files_raw, list):
+        raise ValueError("`files` must be an array of tables in TOML config")
+    return _build_config(
+        app_raw=app_raw,
+        llm_raw=llm_raw,
+        channels_raw=channels_raw,
+        videos_raw=videos_raw,
+        files_raw=files_raw,
+    )

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import glob
 import json
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,9 +35,35 @@ class YtDlpAdapter:
     """Adapter around yt-dlp subprocess calls."""
 
     binary: str = "yt-dlp"
+    ffmpeg_binary: str = "ffmpeg"
     timeout_seconds: int = 120
+    ffmpeg_timeout_seconds: int = 300
     retries: int = 2
     backoff_seconds: int = 2
+    _resolved_binary: str | None = field(default=None, init=False, repr=False)
+
+    def _resolve_binary(self) -> str:
+        if self._resolved_binary:
+            return self._resolved_binary
+
+        discovered = shutil.which(self.binary)
+        if discovered:
+            self._resolved_binary = discovered
+            return discovered
+
+        if "/" not in self.binary:
+            venv_candidate = Path(sys.executable).parent / self.binary
+            if venv_candidate.exists():
+                self._resolved_binary = str(venv_candidate)
+                return self._resolved_binary
+
+            resolved_candidate = Path(sys.executable).resolve().parent / self.binary
+            if resolved_candidate.exists():
+                self._resolved_binary = str(resolved_candidate)
+                return self._resolved_binary
+
+        self._resolved_binary = self.binary
+        return self._resolved_binary
 
     def _run(
         self,
@@ -50,7 +78,7 @@ class YtDlpAdapter:
         for attempt in range(1, attempts + 1):
             try:
                 return subprocess.run(
-                    [self.binary, *args],
+                    [self._resolve_binary(), *args],
                     check=not allow_failure,
                     text=True,
                     capture_output=True,
@@ -91,7 +119,10 @@ class YtDlpAdapter:
             return None
         return VideoRecord(
             video_id=str(video_id),
+            title=str(entry.get("title") or video_id),
+            source_kind="youtube_video",
             video_url=f"https://www.youtube.com/watch?v={video_id}",
+            local_path=None,
             channel_id=(
                 str(entry.get("channel_id") or default_channel_id)
                 if (entry.get("channel_id") or default_channel_id)
@@ -99,7 +130,6 @@ class YtDlpAdapter:
             ),
             channel_name=str(entry.get("channel") or default_channel_name),
             channel_url=channel_url,
-            title=str(entry.get("title") or video_id),
             description=(
                 str(entry.get("description"))
                 if entry.get("description") is not None
@@ -161,7 +191,10 @@ class YtDlpAdapter:
         payload = self._run_json(["--dump-single-json", "--skip-download", video_url])
         return VideoRecord(
             video_id=str(payload.get("id") or fallback.video_id),
+            title=str(payload.get("title") or fallback.title),
+            source_kind="youtube_video",
             video_url=video_url,
+            local_path=None,
             channel_id=(
                 str(payload.get("channel_id"))
                 if payload.get("channel_id") is not None
@@ -169,7 +202,6 @@ class YtDlpAdapter:
             ),
             channel_name=str(payload.get("channel") or fallback.channel_name),
             channel_url=fallback.channel_url,
-            title=str(payload.get("title") or fallback.title),
             description=(
                 str(payload.get("description"))
                 if payload.get("description") is not None
@@ -259,3 +291,129 @@ class YtDlpAdapter:
                 language=language,
                 vtt_text=transcript_path.read_text(encoding="utf-8"),
             )
+
+    def download_audio_clip(
+        self,
+        *,
+        video_url: str,
+        video_id: str,
+        output_dir: Path,
+        clip_start: str | None,
+        clip_end: str | None,
+    ) -> Path:
+        """Download best audio and optionally trim clip bounds using ffmpeg."""
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_tmpl = str(output_dir / f"{video_id}.%(ext)s")
+        self._run(
+            [
+                "--no-playlist",
+                "--extract-audio",
+                "--audio-format",
+                "mp3",
+                "--output",
+                out_tmpl,
+                video_url,
+            ],
+            retry=True,
+        )
+        matches = sorted(output_dir.glob(f"{video_id}.*"))
+        source_path = next((m for m in matches if m.is_file()), None)
+        if source_path is None:
+            raise RuntimeError("audio_download_failed")
+
+        start_seconds = _parse_timecode_seconds(clip_start)
+        end_seconds = _parse_timecode_seconds(clip_end)
+        if start_seconds is None and end_seconds is None:
+            return source_path
+        if (
+            start_seconds is not None
+            and end_seconds is not None
+            and end_seconds <= start_seconds
+        ):
+            raise RuntimeError("invalid_clip_range")
+
+        suffix = []
+        if clip_start:
+            suffix.append(clip_start.replace(":", "-"))
+        if clip_end:
+            suffix.append(clip_end.replace(":", "-"))
+        clip_name = (
+            f"{video_id}_{'_to_'.join(suffix)}.mp3"
+            if suffix
+            else f"{video_id}_clip.mp3"
+        )
+        clip_path = output_dir / clip_name
+
+        ffmpeg_cmd = [
+            self.ffmpeg_binary,
+            "-y",
+            "-i",
+            str(source_path),
+        ]
+        if start_seconds is not None:
+            ffmpeg_cmd.extend(["-ss", f"{start_seconds:.3f}"])
+        if end_seconds is not None and start_seconds is not None:
+            ffmpeg_cmd.extend(["-t", f"{(end_seconds - start_seconds):.3f}"])
+        elif end_seconds is not None:
+            ffmpeg_cmd.extend(["-to", f"{end_seconds:.3f}"])
+        ffmpeg_cmd.extend(["-vn", "-acodec", "copy", str(clip_path)])
+        subprocess.run(
+            ffmpeg_cmd,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=self.ffmpeg_timeout_seconds,
+        )
+        return clip_path
+
+    def download_video_file(
+        self,
+        *,
+        video_url: str,
+        video_id: str,
+        output_dir: Path,
+    ) -> Path:
+        """Download a video file for later frame extraction."""
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_tmpl = str(output_dir / f"{video_id}.%(ext)s")
+        self._run(
+            [
+                "--no-playlist",
+                "-f",
+                "mp4/best",
+                "--merge-output-format",
+                "mp4",
+                "--output",
+                out_tmpl,
+                video_url,
+            ],
+            retry=True,
+        )
+        matches = sorted(output_dir.glob(f"{video_id}.*"))
+        video_path = next((match for match in matches if match.is_file()), None)
+        if video_path is None:
+            raise RuntimeError("video_download_failed")
+        return video_path
+
+
+def _parse_timecode_seconds(value: str | None) -> float | None:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    parts = raw.split(":")
+    if len(parts) == 1:
+        return float(parts[0])
+    if len(parts) == 2:
+        minutes = int(parts[0])
+        seconds = float(parts[1])
+        return minutes * 60.0 + seconds
+    if len(parts) == 3:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+        return hours * 3600.0 + minutes * 60.0 + seconds
+    raise RuntimeError(f"invalid_timecode: {value}")
