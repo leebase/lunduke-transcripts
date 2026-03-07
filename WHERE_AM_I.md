@@ -11,7 +11,7 @@
 | **Project** | lunduke-transcripts |
 | **Profile** | Python Package |
 | **Current Phase** | Phase 6 — Tutorial Quality Closeout / Pedagogy Next |
-| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality is now the main remaining product frontier rather than pipeline blocking semantics |
+| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, and selective ChatGPT Plus `gpt-5.4` routing are shipped; tutorial quality and live-run polish are now the main remaining product frontiers rather than pipeline blocking semantics |
 | **Last Updated** | 2026-03-07 |
 
 ---
@@ -41,7 +41,7 @@
 | Ship source-agnostic tutorial asset extraction | ✅ Done | Local file ingest, frame extraction, degraded bundle handling, and bundle artifacts implemented |
 | Ship downstream multi-agent written tutorial generation | ✅ Done | `tutorial` CLI, approval gate, validation, review, revision, and final Markdown output are implemented |
 | Ship downstream tutorial rendering | ✅ Done | `render` CLI, image validation, HTML staging, PDF output, and render manifests are implemented |
-| Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, and advisory co-editor semantics are in; the remaining gap is the quality of the tutorial prose and step selection |
+| Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, advisory co-editor semantics, and a `Codex` terminology copy-edit pass are in; the remaining gap is the quality of the tutorial prose and step selection |
 | Make real screencast tutorial reruns finish reliably | ✅ Done | `tutorial --approve-outline --reprocess` now completes cleanly on the real screencast and republishes fresh Markdown/PDF instead of leaving stale finals in place |
 | Route expensive tutorial stages through ChatGPT Plus `gpt-5.4` | ✅ Done | `lee-llm-router` now handles tutorial writing + technical review while cheap stages stay on cheaper OpenRouter models by default |
 
@@ -73,6 +73,7 @@
 | Candidate frames are not yet semantically ranked | Renderers may get too many screenshots | 🟡 Deferred to next phase |
 | Missing captions for some videos | Partial transcript coverage | 🟢 Handled with ASR fallback path |
 | Screencast tutorial still reads too much like project notes | Output is fresh and publishable in pipeline terms, but content quality still needs editorial improvement | 🟡 Active product-quality constraint |
+| Some live router-backed tutorial runs still linger after refreshing draft artifacts | Test As Lee can show a clean refreshed draft while the CLI process remains alive in an SSL read | 🟡 Needs investigation |
 
 ---
 
@@ -101,6 +102,7 @@
 | Strong-model tutorial stages run through `lee-llm-router` | ChatGPT Plus `gpt-5.4` is reserved by default for tutorial writing + technical review while cheap stages remain inexpensive | 2026-03-07 |
 | Router paths are resolved relative to the chosen config file | Running the CLI from another working directory must not break router configs or traces | 2026-03-07 |
 | Fresh final artifacts are written even when editorial warnings remain | Human review should see the newest Markdown/PDF rather than stale successful artifacts | 2026-03-07 |
+| Public tutorial drafts receive deterministic copy-edits for known tool-name confusions | Reader-facing artifacts should not leak obvious transcript homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
 
 ---
 
@@ -120,5 +122,6 @@ Phase 6 tutorial quality and format expansion:
 
 1. improve step selection so incidental environment setup does not dominate tutorials
 2. improve tutorial voice and ghostwriting quality
-3. decide whether to add a source-interpretation stage before planning
-4. add the next renderer target after PDF
+3. investigate the lingering router-backed live `tutorial` process behavior
+4. decide whether to add a source-interpretation stage before planning
+5. add the next renderer target after PDF

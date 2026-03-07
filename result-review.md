@@ -6,6 +6,41 @@
 
 ---
 
+## 2026-03-07 — Codex Terminology Guard Added to Public Tutorial Output
+
+Added a narrow public-facing copy-edit and validation backstop so tutorial
+drafts stop leaking the `Codex`/`codecs` transcript homophone into reader-facing
+Markdown.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Public copy edit | Added a deterministic post-writer pass that normalizes obvious `Codex`/`codecs` confusion before tutorial validation runs |
+| Prompt guidance | Tightened writer/reviewer prompt guidance and the tutorial-writing skill so obvious tool-name homophone mistakes are corrected rather than preserved |
+| Regression coverage | Added a pipeline regression proving that public tutorial Markdown no longer ships `GPT 5.3 codecs`-style wording |
+| Live validation | Re-ran the real `AgentFlowComplete_compressed.mp4` tutorial flow and confirmed the fresh draft now uses `Codex` consistently with no terminology findings in `tutorial_validation_report.json` |
+
+### Why It Matters
+
+- Fixes a visible public-artifact quality bug that would undermine trust in the
+  tutorial output.
+- Treats the terminology issue like copy editing, not a blocking review veto,
+  which fits the current co-editor model better.
+
+### How to Verify
+
+1. Run targeted checks:
+   - `./.venv/bin/pytest -q tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/ruff check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/black --check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+2. Regenerate the screencast tutorial draft:
+   - `./.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --reprocess --max-review-cycles 0 --config config/channels.toml --env-file .env`
+3. Inspect the fresh draft:
+   - `rg -n '\\bCodecs\\b|\\bcodecs\\b|\\bCodex\\b' data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_draft.md`
+4. Confirm the validation report no longer includes a terminology finding:
+   - inspect `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_validation_report.json`
+
 ## 2026-03-07 — Advisory Co-Editor Tutorial Flow Closed Out
 
 Closed Sprint 10 by converting tutorial validation/review into advisory

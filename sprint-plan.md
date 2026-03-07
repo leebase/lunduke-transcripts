@@ -85,6 +85,7 @@ Assumptions:
 - [ ] Strengthen writer prompts and skills around context, payoff, and learner-oriented sequencing
 - [ ] Tighten technical/adversarial review prompts around “is this actually a good public tutorial?”
 - [ ] Reduce repeated “step title not represented” and similar low-signal findings in the final warning set
+- [x] Add a terminology spellcheck/copy-edit guard for obvious product-name mistakes such as `Codex`/`codecs`
 - [ ] Re-run `AgentFlowComplete_compressed.mp4` and compare quality against the current refreshed Markdown/PDF
 
 ### Acceptance Criteria
@@ -92,6 +93,16 @@ Assumptions:
 1. The first actionable section starts with the real workflow instead of environmental setup.
 2. The opening context explains what the tutorial is for and why it matters in a tighter, more public-facing way.
 3. The final Markdown reads less like project notes and more like an authored tutorial in the speaker’s voice.
+
+### Delivery Notes
+
+- Public tutorial drafts now get a narrow deterministic copy-edit pass for
+  obvious tool-name confusions before validation runs.
+- Regression coverage now checks that a draft containing `GPT 5.3 codecs` or
+  similar public-facing wording is normalized to `Codex` in the final Markdown.
+- A fresh live screencast draft confirmed the `Codex` spelling fix, but some
+  router-backed `tutorial` CLI runs still linger after draft refresh and need a
+  separate reliability pass.
 
 ---
 

@@ -36,6 +36,12 @@ AGENT_NAMES = [
     "review-responder",
 ]
 
+SUSPICIOUS_CODECS_PATTERN = re.compile(r"\bcodecs\b", re.IGNORECASE)
+SUSPICIOUS_CODECS_CONTEXT_PATTERN = re.compile(
+    r"\b(?:gpt|chatgpt|subscription|ai|tool|workflow|project|agent)\b",
+    re.IGNORECASE,
+)
+
 
 class TutorialPipeline:
     """Generate tutorial artifacts from a canonical tutorial bundle."""
@@ -203,6 +209,7 @@ class TutorialPipeline:
                 frame_selection_plan=frame_selection_plan,
                 feedback=feedback_by_agent.get("script-writer", []),
             )
+            draft_markdown = _apply_public_copyedits(draft_markdown)
             (tutorial_dir / "tutorial_draft.md").write_text(
                 draft_markdown, encoding="utf-8"
             )
@@ -857,7 +864,56 @@ def _validate_public_tutorial_markdown(
                 reroute_target="script-writer",
             )
         )
+    if _contains_suspicious_codex_confusion(draft_markdown):
+        findings.append(
+            _finding(
+                severity="medium",
+                category="terminology",
+                message=(
+                    "Use `Codex`, not `codecs`, when referring to the AI tool name."
+                ),
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
     return findings
+
+
+def _contains_suspicious_codex_confusion(draft_markdown: str) -> bool:
+    normalized_markdown = draft_markdown.replace("Codex", "")
+    for match in SUSPICIOUS_CODECS_PATTERN.finditer(normalized_markdown):
+        start = max(match.start() - 80, 0)
+        end = min(match.end() + 80, len(normalized_markdown))
+        context_window = normalized_markdown[start:end]
+        if SUSPICIOUS_CODECS_CONTEXT_PATTERN.search(context_window):
+            return True
+    return False
+
+
+def _apply_public_copyedits(draft_markdown: str) -> str:
+    if "Codex" in draft_markdown or _contains_suspicious_codex_confusion(
+        draft_markdown
+    ):
+        return SUSPICIOUS_CODECS_PATTERN.sub("Codex", draft_markdown)
+
+    pieces: list[str] = []
+    last_index = 0
+    for match in SUSPICIOUS_CODECS_PATTERN.finditer(draft_markdown):
+        pieces.append(draft_markdown[last_index : match.start()])
+        replacement = match.group(0)
+        start = max(match.start() - 80, 0)
+        end = min(match.end() + 80, len(draft_markdown))
+        context_window = draft_markdown[start:end]
+        if SUSPICIOUS_CODECS_CONTEXT_PATTERN.search(context_window):
+            replacement = "Codex"
+        pieces.append(replacement)
+        last_index = match.end()
+
+    if not pieces:
+        return draft_markdown
+
+    pieces.append(draft_markdown[last_index:])
+    return "".join(pieces)
 
 
 def _sections_requiring_back_to_top(

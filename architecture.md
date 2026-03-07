@@ -138,3 +138,25 @@ file, with a repo-root fallback for `config/...` assets that exist there. The
 subscription provider in `lee-llm-router` now sends `instructions`, uses SSE,
 stops on the completion signal, omits unsupported `temperature`, and enforces a
 wall-clock timeout guard for streaming responses.
+
+## 2026-03-07 — Public tutorial drafts get deterministic copy-edits for obvious tool-name confusions
+
+**Decision:** After the writer returns Markdown, the tutorial pipeline applies a
+small deterministic copy-edit pass for known public-facing tool-name
+confusions, such as replacing `codecs` with `Codex` when the draft is clearly
+referring to the OpenAI coding tool.
+
+**Rationale:** Reader-facing tutorials should not ship obvious transcript or ASR
+homophone mistakes for product names. Prompt guidance and reviewer feedback help,
+but a small deterministic pass is more reliable for recurring high-visibility
+errors and behaves like a copy editor instead of a publish gate.
+
+**Alternatives rejected:** Relying only on prompts left repeated `Codex`/`codecs`
+mistakes in live drafts. Turning terminology findings back into hard blockers
+would regress the co-editor model and still would not guarantee that the public
+artifact got repaired.
+
+**Consequences:** Fresh public drafts are normalized before validation runs, and
+the validator remains as a backstop if suspicious terminology survives. This is
+intentionally narrow: it targets known high-signal product-name confusions
+instead of acting as a generic spellchecker.

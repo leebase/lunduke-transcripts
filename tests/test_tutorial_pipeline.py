@@ -407,6 +407,64 @@ def test_final_tutorial_rejects_evidence_leakage_and_missing_navigation(
     assert "evidence_leakage" in categories
 
 
+def test_final_tutorial_flags_known_term_confusions(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                '<a id="top"></a>\n\n'
+                "# Demo Tutorial\n\n"
+                "## What This Tutorial Is For\n\n"
+                "This tutorial shows how to use GPT 5.3 codecs in the workflow.\n\n"
+                "[Back to top](#top)\n\n"
+                "## Table of Contents\n\n"
+                "- [Open the terminal](#open-the-terminal)\n\n"
+                '<a id="open-the-terminal"></a>\n\n'
+                "## Open the terminal\n\n"
+                "This section covers codecs in the project workflow.\n\n"
+                "![Terminal window prepared for the command.](../frames/000000.jpg)\n\n"
+                "*Introduction to the tutorial covering codecs and setup.*\n\n"
+                "[Back to top](#top)\n"
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.status == "published"
+    final_markdown = (summary.tutorial_dir / "tutorial_final.md").read_text(
+        encoding="utf-8"
+    )
+    assert "codecs" not in final_markdown.lower()
+    assert "Codex" in final_markdown
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    terminology_categories = [finding["category"] for finding in validation["findings"]]
+    assert "terminology" not in terminology_categories
+
+
 def test_definition_flags_control_public_tutorial_validation(tmp_path) -> None:
     bundle_path = _make_bundle(tmp_path)
     agents_dir, skills_dir = _make_agent_files(tmp_path)

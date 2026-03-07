@@ -33,8 +33,9 @@
 Sprint 10 is closed. The tutorial pipeline now uses advisory co-editors instead
 of tutorial-quality hard gates, publishes a fresh latest artifact after outline
 approval, and routes only the heavier editorial stages through ChatGPT Plus by
-default. Sprint 11 is next: make the tutorial itself read like a stronger piece
-of ghostwritten instructional writing.
+default. Sprint 11 is focused on making the tutorial itself read like a
+stronger piece of ghostwritten instructional writing while tightening public
+artifact polish.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -91,10 +92,13 @@ of ghostwritten instructional writing.
 - ✅ Added a wall-clock timeout guard to the ChatGPT subscription streaming provider in `lee-llm-router`
 - ✅ Narrowed the default ChatGPT Plus routing to writer + technical reviewer for better real-run reliability
 - ✅ Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF under the advisory co-editor model
+- ✅ Added a deterministic public copy-edit pass plus regression coverage for obvious `Codex`/`codecs` name confusion
+- ✅ Test As Lee regenerated the live screencast draft and confirmed the fresh public Markdown now uses `Codex` consistently with no terminology validation findings
 
 ### In Progress
 - ⏳ Sprint 11 planning: tutorial pedagogy, ghostwriting quality, and step selection
 - ⏳ Evaluating how much stronger the writer/planner prompts should get before adding a source-interpretation stage
+- ⏳ Investigating why some router-backed live `tutorial` CLI runs linger in an SSL read after the draft artifacts are already refreshed
 
 ---
 
@@ -124,6 +128,7 @@ of ghostwritten instructional writing.
 | Router paths resolve relative to the chosen config file | Tutorial routing should not depend on launching the CLI from the repo root | 2026-03-07 |
 | Repo-root fallback is allowed for `config/...` router assets | Real configs commonly point at repo-root config files even when the main TOML file lives under `config/` | 2026-03-07 |
 | Editorial warnings no longer suppress fresh final artifacts | The latest approved tutorial should always be inspectable and renderable, even when reviewers still have objections | 2026-03-07 |
+| Public tutorial drafts get deterministic copy-edits for known tool-name confusions before validation | Reader-facing output should not leak obvious ASR homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
 
 ---
 
@@ -154,7 +159,7 @@ of ghostwritten instructional writing.
 2. Should the visual editor move from metadata-only frame selection to a vision-aware review pass?
 3. Is DOCX or PPTX the next renderer target after PDF?
 4. Should Sprint 11 add a dedicated source-interpretation stage before planning?
-5. Should adversarial review optionally support a stronger routed model again once the subscription path is more stable?
+5. Why do some router-backed live `tutorial` runs linger in an SSL read after refreshing draft artifacts?
 
 ---
 
@@ -165,7 +170,8 @@ of ghostwritten instructional writing.
 | 1 | Improve tutorial step selection so incidental setup does not dominate the lesson | Human+AI | Screencast tutorials skip or demote environment setup that is not core to the workflow |
 | 2 | Keep strengthening tutorial voice and ghostwriting quality | Human+AI | Tutorials read like the speaker coached by a top educator, not prettified transcripts |
 | 3 | Decide whether to add a source-interpretation stage before planning | Human+AI | Planner/writer get a stronger “what is this video really about?” artifact |
-| 4 | Add the next renderer target after PDF | Human+AI | DOCX or PPTX export works from the published tutorial artifacts |
+| 4 | Investigate the lingering router-backed live tutorial processes seen during Test As Lee | Human+AI | The real `tutorial` CLI exits cleanly after refreshing artifacts instead of hanging in an SSL read |
+| 5 | Add the next renderer target after PDF | Human+AI | DOCX or PPTX export works from the published tutorial artifacts |
 
 ---
 

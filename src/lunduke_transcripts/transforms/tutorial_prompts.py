@@ -261,6 +261,15 @@ def build_writer_prompt(
                 "transcript citations, or reviewer/provenance language in "
                 "the final Markdown."
             ),
+            (
+                "Preserve exact tool and product names. Do not autocorrect or "
+                "silently rename names like `Codex`."
+            ),
+            (
+                "Correct obvious transcript or ASR homophone mistakes in tool "
+                "names when the intended product is clear, such as using "
+                "`Codex` instead of `codecs` for the OpenAI coding tool."
+            ),
             "Do not write `Evidence:` anywhere in the tutorial.",
             (
                 "Do not narrate the video with phrases like `the speaker "
@@ -308,6 +317,11 @@ def build_technical_review_prompt(
                 "Treat transcript leakage, missing context, missing table "
                 "of contents, and internal-thinking leakage as "
                 "tutorial-quality defects."
+            ),
+            (
+                "Treat obvious tool-name mistakes, such as `codecs` where "
+                "`Codex` is clearly intended, as copy-edit defects that must "
+                "be corrected in the next pass."
             ),
             "Call out incidental setup steps that do not belong in the core tutorial.",
             (
@@ -373,6 +387,11 @@ def build_adversarial_review_prompt(
                 "Flag voice drift, evidence leakage, generic tutorial "
                 "prose, and internal scaffolding leaking into the public "
                 "artifact."
+            ),
+            (
+                "Flag obvious tool-name or product-name mistakes when the "
+                "draft preserves a transcript homophone instead of the "
+                "intended term, such as `codecs` for `Codex`."
             ),
             "Do not rewrite the tutorial.",
             (
