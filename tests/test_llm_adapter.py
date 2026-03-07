@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 import types
 
 import pytest
 
-from lunduke_transcripts.infra.llm_adapter import LLMAdapter
+from lunduke_transcripts.infra.llm_adapter import LLMAdapter, _RouterCallTimeout
 
 
 class _FakeResponses:
@@ -169,3 +170,132 @@ def test_routed_json_task_uses_router_json_mode(monkeypatch, tmp_path) -> None:
     assert payload == {"ok": True}
     assert model == "gpt-5.4"
     assert prompt_version == "v1+router:tutorial_reviewer"
+
+
+def test_routed_task_timeout_raises(monkeypatch, tmp_path) -> None:
+    class _SlowRouter:
+        def __init__(self, config, **kwargs) -> None:  # noqa: ANN003
+            self.config = config
+            self.kwargs = kwargs
+
+        def complete(self, role, messages, **overrides):  # noqa: ANN001, ANN003
+            _ = (role, messages, overrides)
+            time.sleep(2)
+            return types.SimpleNamespace(text="late output", model="gpt-5.4")
+
+    config_path = tmp_path / "router.yaml"
+    config_path.write_text("llm:\n  default_role: x\n  providers: {}\n  roles: {}\n")
+    monkeypatch.setattr(
+        "lunduke_transcripts.infra.llm_adapter._import_router_api",
+        lambda repo_path: (_SlowRouter, lambda path: {"path": str(path)}),
+    )
+    adapter = LLMAdapter(
+        provider="openrouter",
+        model="openai/gpt-4.1-mini",
+        prompt_version="v1",
+        timeout_seconds=1,
+        retries=0,
+        retry_backoff_seconds=0,
+        router_enabled=True,
+        router_config_path=str(config_path),
+        router_roles={"tutorial.writer": "tutorial_writer"},
+    )
+
+    with pytest.raises(RuntimeError, match=r"llm_router_timeout\[tutorial.writer\]"):
+        adapter.run_text_task(
+            task_name="tutorial.writer",
+            system_prompt="system",
+            user_prompt="user",
+        )
+
+
+def test_wrapped_router_timeout_raises_timeout_error(monkeypatch, tmp_path) -> None:
+    class _WrappedTimeout(Exception):
+        def __init__(self) -> None:
+            super().__init__("")
+            self.failure_type = types.SimpleNamespace(value="UNKNOWN")
+            self.cause = _RouterCallTimeout()
+
+    class _FakeRouter:
+        def __init__(self, config, **kwargs) -> None:  # noqa: ANN003
+            self.config = config
+            self.kwargs = kwargs
+
+        def complete(self, role, messages, **overrides):  # noqa: ANN001, ANN003
+            _ = (role, messages, overrides)
+            raise _WrappedTimeout()
+
+    config_path = tmp_path / "router.yaml"
+    config_path.write_text("llm:\n  default_role: x\n  providers: {}\n  roles: {}\n")
+    monkeypatch.setattr(
+        "lunduke_transcripts.infra.llm_adapter._import_router_api",
+        lambda repo_path: (_FakeRouter, lambda path: {"path": str(path)}),
+    )
+    adapter = LLMAdapter(
+        provider="openrouter",
+        model="openai/gpt-4.1-mini",
+        prompt_version="v1",
+        timeout_seconds=1,
+        retries=0,
+        retry_backoff_seconds=0,
+        router_enabled=True,
+        router_config_path=str(config_path),
+        router_roles={"tutorial.writer": "tutorial_writer"},
+    )
+
+    with pytest.raises(RuntimeError, match=r"llm_router_timeout\[tutorial.writer\]"):
+        adapter.run_text_task(
+            task_name="tutorial.writer",
+            system_prompt="system",
+            user_prompt="user",
+        )
+
+
+def test_router_error_includes_cause_when_message_is_blank(
+    monkeypatch, tmp_path
+) -> None:
+    class _WrappedBlankError(Exception):
+        def __init__(self) -> None:
+            super().__init__("")
+            self.failure_type = types.SimpleNamespace(value="UNKNOWN")
+            self.cause = RuntimeError("provider exploded")
+
+    class _FakeRouter:
+        def __init__(self, config, **kwargs) -> None:  # noqa: ANN003
+            self.config = config
+            self.kwargs = kwargs
+
+        def complete(self, role, messages, **overrides):  # noqa: ANN001, ANN003
+            _ = (role, messages, overrides)
+            raise _WrappedBlankError()
+
+    config_path = tmp_path / "router.yaml"
+    config_path.write_text("llm:\n  default_role: x\n  providers: {}\n  roles: {}\n")
+    monkeypatch.setattr(
+        "lunduke_transcripts.infra.llm_adapter._import_router_api",
+        lambda repo_path: (_FakeRouter, lambda path: {"path": str(path)}),
+    )
+    adapter = LLMAdapter(
+        provider="openrouter",
+        model="openai/gpt-4.1-mini",
+        prompt_version="v1",
+        timeout_seconds=1,
+        retries=0,
+        retry_backoff_seconds=0,
+        router_enabled=True,
+        router_config_path=str(config_path),
+        router_roles={"tutorial.writer": "tutorial_writer"},
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"llm_router_request_failed\[tutorial.writer\]: "
+            r"provider exploded: UNKNOWN"
+        ),
+    ):
+        adapter.run_text_task(
+            task_name="tutorial.writer",
+            system_prompt="system",
+            user_prompt="user",
+        )

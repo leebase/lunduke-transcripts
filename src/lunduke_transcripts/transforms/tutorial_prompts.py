@@ -79,6 +79,7 @@ def build_educator_prompt(
 def build_planner_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     transcript: dict[str, Any],
     feedback: list[str],
 ) -> str:
@@ -86,6 +87,7 @@ def build_planner_prompt(
         title="Plan the tutorial structure from the definition and transcript.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Transcript segments": transcript.get("segments", []),
             "Review feedback": feedback,
         },
@@ -96,13 +98,48 @@ def build_planner_prompt(
                 "The first section should explain what the tutorial is for "
                 "and what the reader will get from it."
             ),
+            (
+                "Keep that opening context compact. Do not turn generic "
+                "`why this matters`, `by the end`, or broad motivational copy "
+                "into separate outline steps unless the transcript clearly "
+                "supports them as distinct taught material."
+            ),
             "Each step must include a stable `step_id`.",
+            (
+                "Only create steps that can be grounded in transcript evidence. "
+                "Do not add speculative extension guidance, future roadmap "
+                "ideas, or generic next-step advice unless the source "
+                "explicitly demonstrates them."
+            ),
             "Flag assumptions and prerequisites that matter to execution.",
             (
                 "Do not turn incidental environment details into tutorial "
                 "steps unless they are required for the workflow."
             ),
             "Prefer learner order over transcript chronology when the video rambles.",
+            (
+                "Start the first actionable section with the core workflow, "
+                "not remote access, recording setup, machine names, or "
+                "one-off environment context unless those are truly required."
+            ),
+            (
+                "Demote incidental setup into prerequisites or brief context "
+                "when the learner can succeed without treating it as a core step."
+            ),
+            (
+                "Prefer the first irreversible workflow action over scaffolding "
+                "steps like creating folders, opening remote sessions, or "
+                "describing the recording environment."
+            ),
+            (
+                "Make the first actionable section align with `best_first_action` "
+                "from the source interpretation unless review feedback explicitly "
+                "says that interpretation was wrong."
+            ),
+            (
+                "Do not promote anything listed under `steps_to_demote` into a "
+                "core tutorial step unless the workflow would fail without it."
+            ),
         ],
         schema={
             "sections": [
@@ -125,9 +162,61 @@ def build_planner_prompt(
     )
 
 
+def build_source_interpretation_prompt(
+    *,
+    definition: dict[str, Any],
+    transcript: dict[str, Any],
+    feedback: list[str],
+) -> str:
+    return _prompt_with_json(
+        title="Interpret what this source should teach before planning the tutorial.",
+        sections={
+            "Tutorial definition": definition,
+            "Transcript segments": transcript.get("segments", []),
+            "Review feedback": feedback,
+        },
+        instructions=[
+            "Return JSON only.",
+            (
+                "Identify the real workflow the learner came to understand, "
+                "not a chronological recap of everything shown on screen."
+            ),
+            (
+                "Separate core workflow actions from incidental setup, "
+                "recording context, machine-specific details, and project "
+                "scaffolding."
+            ),
+            (
+                "Call out the best first actionable move for the learner once "
+                "basic context is established."
+            ),
+            (
+                "The `best_first_action` must be a core workflow move, not "
+                "creating folders, naming files, opening remote sessions, or "
+                "other setup scaffolding unless the source is explicitly a "
+                "setup tutorial."
+            ),
+            (
+                "If the source includes AI/tool-name homophones such as "
+                "`codecs` where `Codex` is clearly intended, normalize them."
+            ),
+        ],
+        schema={
+            "core_workflow": "...",
+            "learner_payoff": "...",
+            "best_first_action": "...",
+            "steps_to_emphasize": ["..."],
+            "steps_to_demote": ["..."],
+            "incidental_context": ["..."],
+            "terminology_notes": ["..."],
+        },
+    )
+
+
 def build_evidence_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     transcript: dict[str, Any],
     feedback: list[str],
@@ -136,6 +225,7 @@ def build_evidence_prompt(
         title="Map each tutorial step to transcript evidence.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Lesson outline": outline,
             "Transcript segments": transcript.get("segments", []),
             "Review feedback": feedback,
@@ -163,6 +253,7 @@ def build_evidence_prompt(
 def build_visual_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_manifest: dict[str, Any] | None,
@@ -174,6 +265,7 @@ def build_visual_prompt(
         title="Select the best frame for each tutorial step.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Lesson outline": outline,
             "Evidence map": evidence_map,
             "Frame candidates": frames,
@@ -209,6 +301,7 @@ def build_visual_prompt(
 def build_writer_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_selection_plan: dict[str, Any],
@@ -218,6 +311,7 @@ def build_writer_prompt(
         title="Write the tutorial draft in Markdown only.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Lesson outline": outline,
             "Evidence map": evidence_map,
             "Frame selection plan": frame_selection_plan,
@@ -227,6 +321,16 @@ def build_writer_prompt(
             "Write only Markdown. Do not wrap it in code fences.",
             "Stay grounded in the evidence map.",
             "Sound like the speaker in the video if coached by a top-notch educator.",
+            (
+                "Follow the section order and step order from the lesson outline. "
+                "Do not reorder steps unless review feedback explicitly told you "
+                "to change the outline."
+            ),
+            (
+                "Represent each outline step title clearly in the draft and keep "
+                "the wording close enough that a reviewer can match the draft back "
+                "to the outline."
+            ),
             (
                 "Use light enrichment for orientation, framing, and concise "
                 "practical clarity."
@@ -241,6 +345,10 @@ def build_writer_prompt(
                 "what the reader will have by the end before the step-by-step "
                 "sections begin."
             ),
+            (
+                "Make the opening context sound public-facing and learner-oriented, "
+                "not like project notes or a transcript summary."
+            ),
             "Include a `## Table of Contents` section with internal links.",
             (
                 "Do not make remote-access details, machine names, recording "
@@ -251,6 +359,36 @@ def build_writer_prompt(
                 "If setup context matters but is not core to the lesson, keep "
                 "it brief in the intro or prerequisites instead of turning it "
                 "into a main tutorial step."
+            ),
+            (
+                "Do not create top-level sections about source limitations, "
+                "visual notes, evidence posture, or other production scaffolding. "
+                "If a caveat is essential, weave it into the relevant intro or step."
+            ),
+            (
+                "Favor payoff-oriented section titles and sequencing that help "
+                "the reader complete the workflow, not a play-by-play of what "
+                "happened on screen."
+            ),
+            (
+                "Treat the source as a demonstrated workflow, not proof of product "
+                "capabilities beyond what the transcript evidence actually supports."
+            ),
+            (
+                "Do not invent exact commands, repo layout details, prerequisites, "
+                "or output guarantees. If the source does not show them concretely, "
+                "say that this screencast demonstrates the workflow at a higher level."
+            ),
+            (
+                "When the evidence is suggestive rather than definitive, use "
+                "careful language such as `the walkthrough suggests`, `the example "
+                "shows`, or `the demonstrated project uses` instead of presenting "
+                "the claim as a guaranteed product fact."
+            ),
+            (
+                "Do not turn a missing operational detail into smooth filler prose. "
+                "Either ground the detail in evidence or acknowledge that the source "
+                "does not provide an exact command or configuration."
             ),
             (
                 "Every major section after the table of contents must end "
@@ -291,6 +429,7 @@ def build_writer_prompt(
 def build_technical_review_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_selection_plan: dict[str, Any],
@@ -301,6 +440,7 @@ def build_technical_review_prompt(
         title="Review the tutorial draft like a technical reviewer.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Lesson outline": outline,
             "Evidence map": evidence_map,
             "Frame selection plan": frame_selection_plan,
@@ -312,6 +452,14 @@ def build_technical_review_prompt(
             (
                 "Focus on technical accuracy, completeness, sequence quality, "
                 "operational usability, and whether this works as a public tutorial."
+            ),
+            (
+                "Treat a weak opening payoff, project-note voice, or an "
+                "incidental setup-first lesson structure as tutorial-quality defects."
+            ),
+            (
+                "Treat draft/outline order drift as a defect when the draft "
+                "reorders steps in a way that changes learner sequencing."
             ),
             (
                 "Treat transcript leakage, missing context, missing table "
@@ -356,6 +504,7 @@ def build_technical_review_prompt(
 def build_adversarial_review_prompt(
     *,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_selection_plan: dict[str, Any],
@@ -366,6 +515,7 @@ def build_adversarial_review_prompt(
         title="Adversarially attack this tutorial draft.",
         sections={
             "Tutorial definition": definition,
+            "Source interpretation": source_interpretation,
             "Lesson outline": outline,
             "Evidence map": evidence_map,
             "Frame selection plan": frame_selection_plan,
@@ -377,6 +527,15 @@ def build_adversarial_review_prompt(
             (
                 "Attack unsupported claims, transcript meaning drift, learner "
                 "confusion, and weak screenshot support."
+            ),
+            (
+                "Attack drafts that read like internal project notes, bury the "
+                "real payoff, or start the lesson with incidental setup instead "
+                "of the workflow the reader came to learn."
+            ),
+            (
+                "Attack drafts that imply runnable precision when the source only "
+                "demonstrates a workflow at a conceptual level."
             ),
             "You are advisory only. You do not decide publishability.",
             (

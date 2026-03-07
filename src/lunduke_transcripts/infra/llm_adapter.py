@@ -6,8 +6,10 @@ import importlib
 import json
 import os
 import re
+import signal
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +50,7 @@ def _import_router_api(
     return module.LLMRouter, module.load_config
 
 
-class LLMAdapter:
+class _LLMAdapterBase:
     """LLM adapter with OpenAI and OpenRouter support."""
 
     def __init__(
@@ -78,6 +80,53 @@ class LLMAdapter:
         self.router_trace_dir = router_trace_dir
         self.router_roles = dict(router_roles or {})
         self._router: Any | None = None
+
+
+class _RouterCallTimeout(RuntimeError):
+    pass
+
+
+@contextmanager
+def _router_timeout_guard(timeout_seconds: int):
+    if timeout_seconds <= 0:
+        yield
+        return
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def _handle_timeout(signum, frame):  # noqa: ANN001, ARG001
+        raise _RouterCallTimeout()
+
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+class LLMAdapter(_LLMAdapterBase):
+    def _is_router_timeout_error(self, exc: Exception) -> bool:
+        cause = getattr(exc, "cause", None)
+        if isinstance(exc, _RouterCallTimeout) or isinstance(cause, _RouterCallTimeout):
+            return True
+        failure_type = getattr(exc, "failure_type", None)
+        failure_value = getattr(failure_type, "value", failure_type)
+        return str(failure_value or "").upper() == "TIMEOUT"
+
+    def _format_router_error(self, exc: Exception) -> str:
+        details = str(exc).strip()
+        failure_type = getattr(exc, "failure_type", None)
+        failure_value = str(getattr(failure_type, "value", failure_type) or "").strip()
+        cause = getattr(exc, "cause", None)
+        cause_text = str(cause).strip() if cause is not None else ""
+
+        parts = [part for part in (details, cause_text, failure_value) if part]
+        if parts:
+            return ": ".join(parts)
+        if cause is not None:
+            return repr(cause)
+        return exc.__class__.__name__
 
     def _api_key(self) -> str:
         if self.provider == "openai":
@@ -211,17 +260,29 @@ class LLMAdapter:
 
         router = self._load_router()
         try:
-            response = router.complete(
-                role=role,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                json_mode=json_mode,
-            )
-        except Exception as exc:  # noqa: BLE001
+            with _router_timeout_guard(self.timeout_seconds):
+                response = router.complete(
+                    role=role,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    json_mode=json_mode,
+                )
+        except _RouterCallTimeout as exc:
             raise RuntimeError(
-                f"llm_router_request_failed[{task_name}]: {exc}"
+                f"llm_router_timeout[{task_name}]: request exceeded "
+                f"{self.timeout_seconds}s"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            if self._is_router_timeout_error(exc):
+                raise RuntimeError(
+                    f"llm_router_timeout[{task_name}]: request exceeded "
+                    f"{self.timeout_seconds}s"
+                ) from exc
+            raise RuntimeError(
+                f"llm_router_request_failed[{task_name}]: "
+                f"{self._format_router_error(exc)}"
             ) from exc
 
         text = str(getattr(response, "text", "") or "").strip()

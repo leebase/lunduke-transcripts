@@ -18,6 +18,7 @@ from lunduke_transcripts.transforms.tutorial_prompts import (
     build_educator_prompt,
     build_evidence_prompt,
     build_planner_prompt,
+    build_source_interpretation_prompt,
     build_system_prompt,
     build_technical_review_prompt,
     build_visual_prompt,
@@ -26,6 +27,7 @@ from lunduke_transcripts.transforms.tutorial_prompts import (
 
 AGENT_NAMES = [
     "educator",
+    "source-interpreter",
     "tutorial-planner",
     "evidence-mapper",
     "script-writer",
@@ -41,6 +43,27 @@ SUSPICIOUS_CODECS_CONTEXT_PATTERN = re.compile(
     r"\b(?:gpt|chatgpt|subscription|ai|tool|workflow|project|agent)\b",
     re.IGNORECASE,
 )
+INCIDENTAL_SETUP_PATTERN = re.compile(
+    r"\b(?:remote access|remote desktop|ssh|screen share|recording|obs|webcam|"
+    r"microphone|machine name|hostname|vm\b|virtual machine|desktop session|"
+    r"project folder|workspace setup|set up|setup|install|configure|"
+    r"configuration|environment file|\.env)\b",
+    re.IGNORECASE,
+)
+TITLE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "the",
+    "to",
+    "with",
+    "your",
+}
 
 
 class TutorialPipeline:
@@ -120,6 +143,7 @@ class TutorialPipeline:
             and existing_manifest.get("status") == "awaiting_outline_approval"
             and _all_exist(
                 tutorial_dir / "tutorial_definition.json",
+                tutorial_dir / "source_interpretation.json",
                 tutorial_dir / "lesson_outline.json",
                 tutorial_dir / "evidence_map.json",
                 tutorial_dir / "frame_selection_plan.json",
@@ -131,6 +155,9 @@ class TutorialPipeline:
 
         if reusable_outline:
             definition = _load_json_required(tutorial_dir / "tutorial_definition.json")
+            source_interpretation = _load_json_required(
+                tutorial_dir / "source_interpretation.json"
+            )
             outline = _load_json_required(tutorial_dir / "lesson_outline.json")
             evidence_map = _load_json_required(tutorial_dir / "evidence_map.json")
             frame_selection_plan = _load_json_required(
@@ -141,8 +168,18 @@ class TutorialPipeline:
             definition = self._run_educator(source)
             _write_json(tutorial_dir / "tutorial_definition.json", definition)
 
+            source_interpretation = self._run_source_interpreter(
+                definition=definition,
+                transcript=source["transcript"],
+                feedback=[],
+            )
+            _write_json(
+                tutorial_dir / "source_interpretation.json", source_interpretation
+            )
+
             outline = self._run_planner(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 transcript=source["transcript"],
                 feedback=[],
             )
@@ -150,6 +187,7 @@ class TutorialPipeline:
 
             evidence_map = self._run_evidence_mapper(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 transcript=source["transcript"],
                 feedback=[],
@@ -158,6 +196,7 @@ class TutorialPipeline:
 
             frame_selection_plan = self._run_visual_editor(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_manifest=source["frame_manifest"],
@@ -204,6 +243,7 @@ class TutorialPipeline:
         while True:
             draft_markdown = self._run_script_writer(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -217,6 +257,7 @@ class TutorialPipeline:
             validation_report = _validate_tutorial(
                 tutorial_dir=tutorial_dir,
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -229,6 +270,7 @@ class TutorialPipeline:
 
             technical_review_report = self._run_technical_review(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -237,6 +279,7 @@ class TutorialPipeline:
             )
             adversarial_review_report = self._run_adversarial_review(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -342,14 +385,24 @@ class TutorialPipeline:
                     feedback=feedback_by_agent.get("educator", []),
                 )
                 _write_json(tutorial_dir / "tutorial_definition.json", definition)
+                source_interpretation = self._run_source_interpreter(
+                    definition=definition,
+                    transcript=source["transcript"],
+                    feedback=feedback_by_agent.get("source-interpreter", []),
+                )
+                _write_json(
+                    tutorial_dir / "source_interpretation.json", source_interpretation
+                )
                 outline = self._run_planner(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     transcript=source["transcript"],
                     feedback=feedback_by_agent.get("tutorial-planner", []),
                 )
                 _write_json(tutorial_dir / "lesson_outline.json", outline)
                 evidence_map = self._run_evidence_mapper(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     transcript=source["transcript"],
                     feedback=feedback_by_agent.get("evidence-mapper", []),
@@ -357,6 +410,46 @@ class TutorialPipeline:
                 _write_json(tutorial_dir / "evidence_map.json", evidence_map)
                 frame_selection_plan = self._run_visual_editor(
                     definition=definition,
+                    source_interpretation=source_interpretation,
+                    outline=outline,
+                    evidence_map=evidence_map,
+                    frame_manifest=source["frame_manifest"],
+                    tutorial_dir=tutorial_dir,
+                    feedback=feedback_by_agent.get("visual-editor", []),
+                )
+                _write_json(
+                    tutorial_dir / "frame_selection_plan.json",
+                    frame_selection_plan,
+                )
+                continue
+
+            if rerun_from_stage == "source-interpreter":
+                source_interpretation = self._run_source_interpreter(
+                    definition=definition,
+                    transcript=source["transcript"],
+                    feedback=feedback_by_agent.get("source-interpreter", []),
+                )
+                _write_json(
+                    tutorial_dir / "source_interpretation.json", source_interpretation
+                )
+                outline = self._run_planner(
+                    definition=definition,
+                    source_interpretation=source_interpretation,
+                    transcript=source["transcript"],
+                    feedback=feedback_by_agent.get("tutorial-planner", []),
+                )
+                _write_json(tutorial_dir / "lesson_outline.json", outline)
+                evidence_map = self._run_evidence_mapper(
+                    definition=definition,
+                    source_interpretation=source_interpretation,
+                    outline=outline,
+                    transcript=source["transcript"],
+                    feedback=feedback_by_agent.get("evidence-mapper", []),
+                )
+                _write_json(tutorial_dir / "evidence_map.json", evidence_map)
+                frame_selection_plan = self._run_visual_editor(
+                    definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     evidence_map=evidence_map,
                     frame_manifest=source["frame_manifest"],
@@ -372,12 +465,14 @@ class TutorialPipeline:
             if rerun_from_stage == "tutorial-planner":
                 outline = self._run_planner(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     transcript=source["transcript"],
                     feedback=feedback_by_agent.get("tutorial-planner", []),
                 )
                 _write_json(tutorial_dir / "lesson_outline.json", outline)
                 evidence_map = self._run_evidence_mapper(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     transcript=source["transcript"],
                     feedback=feedback_by_agent.get("evidence-mapper", []),
@@ -385,6 +480,7 @@ class TutorialPipeline:
                 _write_json(tutorial_dir / "evidence_map.json", evidence_map)
                 frame_selection_plan = self._run_visual_editor(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     evidence_map=evidence_map,
                     frame_manifest=source["frame_manifest"],
@@ -400,6 +496,7 @@ class TutorialPipeline:
             if rerun_from_stage == "evidence-mapper":
                 evidence_map = self._run_evidence_mapper(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     transcript=source["transcript"],
                     feedback=feedback_by_agent.get("evidence-mapper", []),
@@ -407,6 +504,7 @@ class TutorialPipeline:
                 _write_json(tutorial_dir / "evidence_map.json", evidence_map)
                 frame_selection_plan = self._run_visual_editor(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     evidence_map=evidence_map,
                     frame_manifest=source["frame_manifest"],
@@ -422,6 +520,7 @@ class TutorialPipeline:
             if rerun_from_stage == "visual-editor":
                 frame_selection_plan = self._run_visual_editor(
                     definition=definition,
+                    source_interpretation=source_interpretation,
                     outline=outline,
                     evidence_map=evidence_map,
                     frame_manifest=source["frame_manifest"],
@@ -468,10 +567,30 @@ class TutorialPipeline:
         )
         return _normalize_definition(payload)
 
+    def _run_source_interpreter(
+        self,
+        *,
+        definition: dict[str, Any],
+        transcript: dict[str, Any],
+        feedback: list[str],
+    ) -> dict[str, Any]:
+        agent = self.agent_registry.load("source-interpreter")
+        payload, _, _ = self.llm.run_json_task(
+            task_name="tutorial.source-interpretation",
+            system_prompt=build_system_prompt(agent),
+            user_prompt=build_source_interpretation_prompt(
+                definition=definition,
+                transcript=transcript,
+                feedback=feedback,
+            ),
+        )
+        return _normalize_source_interpretation(payload)
+
     def _run_planner(
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         transcript: dict[str, Any],
         feedback: list[str],
     ) -> dict[str, Any]:
@@ -481,16 +600,18 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_planner_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 transcript=transcript,
                 feedback=feedback,
             ),
         )
-        return _normalize_outline(payload)
+        return _normalize_outline(payload, source_interpretation)
 
     def _run_evidence_mapper(
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         outline: dict[str, Any],
         transcript: dict[str, Any],
         feedback: list[str],
@@ -501,6 +622,7 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_evidence_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 transcript=transcript,
                 feedback=feedback,
@@ -512,6 +634,7 @@ class TutorialPipeline:
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         outline: dict[str, Any],
         evidence_map: dict[str, Any],
         frame_manifest: dict[str, Any] | None,
@@ -524,6 +647,7 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_visual_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_manifest=frame_manifest,
@@ -537,6 +661,7 @@ class TutorialPipeline:
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         outline: dict[str, Any],
         evidence_map: dict[str, Any],
         frame_selection_plan: dict[str, Any],
@@ -548,6 +673,7 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_writer_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -560,6 +686,7 @@ class TutorialPipeline:
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         outline: dict[str, Any],
         evidence_map: dict[str, Any],
         frame_selection_plan: dict[str, Any],
@@ -572,6 +699,7 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_technical_review_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -585,6 +713,7 @@ class TutorialPipeline:
         self,
         *,
         definition: dict[str, Any],
+        source_interpretation: dict[str, Any],
         outline: dict[str, Any],
         evidence_map: dict[str, Any],
         frame_selection_plan: dict[str, Any],
@@ -597,6 +726,7 @@ class TutorialPipeline:
             system_prompt=build_system_prompt(agent),
             user_prompt=build_adversarial_review_prompt(
                 definition=definition,
+                source_interpretation=source_interpretation,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -638,13 +768,16 @@ def _validate_tutorial(
     *,
     tutorial_dir: Path,
     definition: dict[str, Any],
+    source_interpretation: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_selection_plan: dict[str, Any],
     draft_markdown: str,
     agent_manifest: dict[str, Any],
 ) -> dict[str, Any]:
+    _ = source_interpretation
     findings: list[dict[str, Any]] = []
+    findings.extend(_validate_outline_pedagogy(outline, source_interpretation))
     structure_findings = _validate_public_tutorial_markdown(
         draft_markdown,
         definition,
@@ -721,7 +854,10 @@ def _validate_tutorial(
                         reroute_target="visual-editor",
                     )
                 )
-            if step.get("title") and step["title"] not in draft_markdown:
+            if not _step_title_is_represented(
+                str(step.get("title") or ""),
+                draft_markdown,
+            ):
                 findings.append(
                     _finding(
                         severity="medium",
@@ -879,6 +1015,88 @@ def _validate_public_tutorial_markdown(
     return findings
 
 
+def _validate_outline_pedagogy(
+    outline: dict[str, Any],
+    source_interpretation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    flattened_steps: list[dict[str, Any]] = []
+    for section in outline.get("sections", []):
+        for step in section.get("steps", []):
+            if isinstance(step, dict):
+                flattened_steps.append(step)
+
+    if len(flattened_steps) < 2:
+        return findings
+
+    first_step = next(
+        (step for step in flattened_steps if not bool(step.get("text_only_allowed"))),
+        flattened_steps[0],
+    )
+    later_substantive_step_exists = any(
+        not _is_incidental_setup_step(step)
+        for step in flattened_steps[flattened_steps.index(first_step) + 1 :]
+    )
+    if _is_incidental_setup_step(first_step) and later_substantive_step_exists:
+        findings.append(
+            _finding(
+                severity="medium",
+                category="incidental_setup_priority",
+                message=(
+                    "The first actionable step foregrounds incidental setup "
+                    "instead of the core workflow."
+                ),
+                step_id=str(first_step.get("step_id") or "") or None,
+                reroute_target="tutorial-planner",
+            )
+        )
+
+    best_first_action = str(
+        source_interpretation.get("best_first_action") or ""
+    ).strip()
+    if best_first_action and not _step_title_is_represented(
+        best_first_action,
+        f"{first_step.get('title', '')}\n{first_step.get('instruction', '')}",
+    ):
+        findings.append(
+            _finding(
+                severity="medium",
+                category="outline_misaligned_with_interpretation",
+                message=(
+                    "The outline's first actionable step does not match the "
+                    "interpreted first core workflow action."
+                ),
+                step_id=str(first_step.get("step_id") or "") or None,
+                reroute_target="tutorial-planner",
+            )
+        )
+
+    demoted_steps = [
+        item
+        for item in source_interpretation.get("steps_to_demote", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    first_step_text = (
+        f"{first_step.get('title', '')}\n{first_step.get('instruction', '')}"
+    )
+    for demoted in demoted_steps:
+        if _step_title_is_represented(demoted, first_step_text):
+            findings.append(
+                _finding(
+                    severity="medium",
+                    category="outline_promotes_demoted_setup",
+                    message=(
+                        "The outline elevates a source-interpretation item that "
+                        "should have been demoted out of the core lesson."
+                    ),
+                    step_id=str(first_step.get("step_id") or "") or None,
+                    reroute_target="tutorial-planner",
+                )
+            )
+            break
+    return findings
+
+
 def _contains_suspicious_codex_confusion(draft_markdown: str) -> bool:
     normalized_markdown = draft_markdown.replace("Codex", "")
     for match in SUSPICIOUS_CODECS_PATTERN.finditer(normalized_markdown):
@@ -888,6 +1106,50 @@ def _contains_suspicious_codex_confusion(draft_markdown: str) -> bool:
         if SUSPICIOUS_CODECS_CONTEXT_PATTERN.search(context_window):
             return True
     return False
+
+
+def _is_incidental_setup_step(step: dict[str, Any]) -> bool:
+    title = str(step.get("title") or "")
+    instruction = str(step.get("instruction") or "")
+    text = f"{title}\n{instruction}".strip()
+    return _is_incidental_setup_text(text)
+
+
+def _is_incidental_setup_text(text: str) -> bool:
+    if not text:
+        return False
+    return bool(INCIDENTAL_SETUP_PATTERN.search(text))
+
+
+def _step_title_is_represented(title: str, draft_markdown: str) -> bool:
+    normalized_title = title.strip()
+    if not normalized_title:
+        return True
+    if normalized_title in draft_markdown:
+        return True
+
+    slug = _slugify_heading(normalized_title)
+    if slug and (
+        f"(#{slug})" in draft_markdown
+        or f'<a id="{slug}"></a>' in draft_markdown
+        or f'id="{slug}"' in draft_markdown
+    ):
+        return True
+
+    markdown_lower = draft_markdown.lower()
+    significant_words = [
+        word
+        for word in re.findall(r"[a-z0-9]+", normalized_title.lower())
+        if len(word) >= 4 and word not in TITLE_STOPWORDS
+    ]
+    if significant_words and all(word in markdown_lower for word in significant_words):
+        return True
+    return False
+
+
+def _slugify_heading(value: str) -> str:
+    words = re.findall(r"[a-z0-9]+", value.lower())
+    return "-".join(words)
 
 
 def _apply_public_copyedits(draft_markdown: str) -> str:
@@ -914,6 +1176,103 @@ def _apply_public_copyedits(draft_markdown: str) -> str:
 
     pieces.append(draft_markdown[last_index:])
     return "".join(pieces)
+
+
+def _copyedit_tutorial_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return text
+    return _apply_public_copyedits(text)
+
+
+def _realign_outline_to_source_interpretation(
+    sections: list[dict[str, Any]],
+    source_interpretation: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not sections:
+        return sections
+
+    best_first_action = str(
+        source_interpretation.get("best_first_action") or ""
+    ).strip()
+    if not best_first_action:
+        return sections
+
+    actionable_positions: list[tuple[int, int]] = []
+    for section_index, section in enumerate(sections):
+        for step_index, step in enumerate(section.get("steps", [])):
+            if not step.get("text_only_allowed"):
+                actionable_positions.append((section_index, step_index))
+
+    if not actionable_positions:
+        return sections
+
+    first_section_index, first_step_index = actionable_positions[0]
+    candidate_position: tuple[int, int] | None = None
+    for section_index, step_index in actionable_positions:
+        step = sections[section_index]["steps"][step_index]
+        if _step_matches_reference(step, best_first_action):
+            candidate_position = (section_index, step_index)
+            break
+
+    if candidate_position is None:
+        return sections
+
+    candidate_section_index, candidate_step_index = candidate_position
+    realigned_sections = deepcopy(sections)
+    if candidate_section_index == first_section_index:
+        section_steps = realigned_sections[first_section_index]["steps"]
+        if candidate_position == actionable_positions[0]:
+            has_leading_setup = any(
+                _is_incidental_setup_step(step)
+                for step in section_steps[:candidate_step_index]
+            )
+            if not has_leading_setup:
+                return realigned_sections
+        else:
+            first_step = sections[first_section_index]["steps"][first_step_index]
+            if not _is_incidental_setup_step(first_step):
+                return realigned_sections
+        candidate_step = section_steps.pop(candidate_step_index)
+        section_steps.insert(0, candidate_step)
+        return realigned_sections
+
+    if candidate_position == actionable_positions[0]:
+        return sections
+
+    first_step = sections[first_section_index]["steps"][first_step_index]
+    if not _is_incidental_setup_step(first_step):
+        return sections
+
+    candidate_section = realigned_sections.pop(candidate_section_index)
+    insertion_index = first_section_index
+    realigned_sections.insert(insertion_index, candidate_section)
+    return realigned_sections
+
+
+def _step_matches_reference(step: dict[str, Any], reference: str) -> bool:
+    step_text = f"{step.get('title', '')}\n{step.get('instruction', '')}".strip()
+    if not step_text or not reference:
+        return False
+    if _step_title_is_represented(reference, step_text) or _step_title_is_represented(
+        step_text, reference
+    ):
+        return True
+    reference_words = _significant_words(reference)
+    step_words = _significant_words(step_text)
+    if not reference_words or not step_words:
+        return False
+    overlap = len(reference_words & step_words)
+    minimum_overlap = min(3, len(reference_words), len(step_words))
+    return overlap >= max(2, minimum_overlap)
+
+
+def _significant_words(value: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", value.lower())
+        if len(word) >= 4 and word not in TITLE_STOPWORDS
+    }
 
 
 def _sections_requiring_back_to_top(
@@ -954,16 +1313,22 @@ def _build_revision_plan(
     for report in (validation_report, technical_report, adversarial_report):
         if report:
             findings.extend(report.get("findings", []))
+    findings = _dedupe_findings(findings)
     by_target: dict[str, list[str]] = {}
     for finding in findings:
         target = str(finding.get("reroute_target") or "script-writer")
-        by_target.setdefault(target, []).append(
-            str(finding.get("message") or "").strip()
-        )
+        message = str(finding.get("message") or "").strip()
+        if not message:
+            continue
+        bucket = by_target.setdefault(target, [])
+        if message not in bucket:
+            bucket.append(message)
 
     rerun_from_stage = "script-writer"
     if any(target == "educator" for target in by_target):
         rerun_from_stage = "educator"
+    elif any(target == "source-interpreter" for target in by_target):
+        rerun_from_stage = "source-interpreter"
     elif any(target == "tutorial-planner" for target in by_target):
         rerun_from_stage = "tutorial-planner"
     elif any(target == "evidence-mapper" for target in by_target):
@@ -1019,6 +1384,9 @@ def _build_manifest(
         "artifacts": {
             "tutorial_definition": _artifact_entry(
                 tutorial_dir / "tutorial_definition.json"
+            ),
+            "source_interpretation": _artifact_entry(
+                tutorial_dir / "source_interpretation.json"
             ),
             "lesson_outline": _artifact_entry(tutorial_dir / "lesson_outline.json"),
             "evidence_map": _artifact_entry(tutorial_dir / "evidence_map.json"),
@@ -1117,7 +1485,51 @@ def _normalize_definition(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_outline(payload: dict[str, Any]) -> dict[str, Any]:
+def _normalize_source_interpretation(payload: dict[str, Any]) -> dict[str, Any]:
+    interpretation = {
+        "schema_version": "1",
+        "core_workflow": _copyedit_tutorial_text(
+            str(payload.get("core_workflow") or "")
+        ),
+        "learner_payoff": _copyedit_tutorial_text(
+            str(payload.get("learner_payoff") or "")
+        ),
+        "best_first_action": _copyedit_tutorial_text(
+            str(payload.get("best_first_action") or "")
+        ),
+        "steps_to_emphasize": [
+            _copyedit_tutorial_text(item)
+            for item in _string_list(payload.get("steps_to_emphasize"))
+        ],
+        "steps_to_demote": [
+            _copyedit_tutorial_text(item)
+            for item in _string_list(payload.get("steps_to_demote"))
+        ],
+        "incidental_context": [
+            _copyedit_tutorial_text(item)
+            for item in _string_list(payload.get("incidental_context"))
+        ],
+        "terminology_notes": [
+            _copyedit_tutorial_text(item)
+            for item in _string_list(payload.get("terminology_notes"))
+        ],
+    }
+    best_first_action = interpretation["best_first_action"]
+    if _is_incidental_setup_text(best_first_action):
+        for emphasized in interpretation["steps_to_emphasize"]:
+            if not _is_incidental_setup_text(emphasized):
+                interpretation["best_first_action"] = emphasized
+                demoted = interpretation["steps_to_demote"]
+                if best_first_action and best_first_action not in demoted:
+                    demoted.insert(0, best_first_action)
+                break
+    return interpretation
+
+
+def _normalize_outline(
+    payload: dict[str, Any],
+    source_interpretation: dict[str, Any],
+) -> dict[str, Any]:
     sections: list[dict[str, Any]] = []
     raw_sections = payload.get("sections")
     if not isinstance(raw_sections, list):
@@ -1137,9 +1549,16 @@ def _normalize_outline(payload: dict[str, Any]) -> dict[str, Any]:
                             raw_step.get("step_id")
                             or f"section-{section_index}-step-{step_index}"
                         ),
-                        "title": str(raw_step.get("title") or f"Step {step_index}"),
-                        "instruction": str(raw_step.get("instruction") or ""),
-                        "assumptions": _string_list(raw_step.get("assumptions")),
+                        "title": _copyedit_tutorial_text(
+                            str(raw_step.get("title") or f"Step {step_index}")
+                        ),
+                        "instruction": _copyedit_tutorial_text(
+                            str(raw_step.get("instruction") or "")
+                        ),
+                        "assumptions": [
+                            _copyedit_tutorial_text(item)
+                            for item in _string_list(raw_step.get("assumptions"))
+                        ],
                         "text_only_allowed": bool(raw_step.get("text_only_allowed")),
                     }
                 )
@@ -1148,12 +1567,20 @@ def _normalize_outline(payload: dict[str, Any]) -> dict[str, Any]:
                 "section_id": str(
                     raw_section.get("section_id") or f"section-{section_index}"
                 ),
-                "title": str(raw_section.get("title") or f"Section {section_index}"),
-                "goal": str(raw_section.get("goal") or ""),
+                "title": _copyedit_tutorial_text(
+                    str(raw_section.get("title") or f"Section {section_index}")
+                ),
+                "goal": _copyedit_tutorial_text(str(raw_section.get("goal") or "")),
                 "steps": steps,
             }
         )
-    return {"schema_version": "1", "sections": sections}
+    return {
+        "schema_version": "1",
+        "sections": _realign_outline_to_source_interpretation(
+            sections,
+            source_interpretation,
+        ),
+    }
 
 
 def _normalize_evidence_map(
@@ -1394,7 +1821,7 @@ def _collect_failure_messages(*reports: dict[str, Any] | None) -> list[str]:
             continue
         for finding in report.get("findings", []):
             message = str(finding.get("message") or "").strip()
-            if message:
+            if message and message not in messages:
                 messages.append(message)
     return messages
 
@@ -1407,9 +1834,26 @@ def _collect_advisory_messages(
     messages: list[str] = []
     for finding in adversarial_report.get("findings", []):
         message = str(finding.get("message") or "").strip()
-        if message:
+        if message and message not in messages:
             messages.append(message)
     return messages
+
+
+def _dedupe_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for finding in findings:
+        key = (
+            str(finding.get("severity") or ""),
+            str(finding.get("category") or ""),
+            str(finding.get("step_id") or ""),
+            str(finding.get("message") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(finding)
+    return deduped
 
 
 def _report_attention_required(report: dict[str, Any] | None) -> bool:

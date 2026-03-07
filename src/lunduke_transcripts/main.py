@@ -460,6 +460,9 @@ def tutorial_command(args: argparse.Namespace) -> int:
     """Execute the multi-agent tutorial generation pipeline."""
 
     load_env_file(args.env_file)
+    bundle_path = Path(args.bundle).expanduser().resolve()
+    if bool(args.reprocess):
+        _clear_tutorial_reprocess_artifacts(bundle_path)
     config_path = Path(args.config)
     if config_path.exists():
         config = load_config(config_path)
@@ -500,7 +503,7 @@ def tutorial_command(args: argparse.Namespace) -> int:
     render_summary: RenderSummary | None = None
     try:
         summary = pipeline.run(
-            bundle_path=Path(args.bundle),
+            bundle_path=bundle_path,
             approve_outline=bool(args.approve_outline),
             reprocess=bool(args.reprocess),
             max_review_cycles=max(int(args.max_review_cycles), 0),
@@ -556,6 +559,31 @@ def tutorial_command(args: argparse.Namespace) -> int:
             )
         )
         return 1
+
+
+def _clear_tutorial_reprocess_artifacts(bundle_path: Path) -> None:
+    tutorial_dir = bundle_path.parent / "tutorial"
+    artifact_names = (
+        "tutorial_definition.json",
+        "source_interpretation.json",
+        "lesson_outline.json",
+        "evidence_map.json",
+        "frame_selection_plan.json",
+        "tutorial_draft.md",
+        "tutorial_validation_report.json",
+        "technical_review_report.json",
+        "adversarial_review_report.json",
+        "tutorial_revision_plan.json",
+        "tutorial_final.md",
+        "tutorial_final.html",
+        "tutorial_final.pdf",
+        "tutorial_manifest.json",
+        "render_manifest.json",
+    )
+    for artifact_name in artifact_names:
+        artifact_path = tutorial_dir / artifact_name
+        if artifact_path.exists():
+            artifact_path.unlink()
 
 
 def render_command(args: argparse.Namespace) -> int:

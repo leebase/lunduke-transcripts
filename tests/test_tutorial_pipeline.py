@@ -28,6 +28,14 @@ class FakeTutorialLLM:
     def run_json_task(self, *, task_name: str, system_prompt: str, user_prompt: str):
         _ = (system_prompt, user_prompt)
         self.calls.append(task_name)
+        if task_name not in self.json_responses:
+            if task_name == "tutorial.source-interpretation":
+                return (
+                    deepcopy(_source_interpretation()),
+                    self.model,
+                    self.prompt_version,
+                )
+            raise KeyError(task_name)
         queue = self.json_responses[task_name]
         return deepcopy(queue.pop(0)), self.model, self.prompt_version
 
@@ -64,6 +72,7 @@ def test_tutorial_pipeline_requires_outline_approval(tmp_path) -> None:
     assert summary.publish_eligible is False
     tutorial_dir = bundle_path.parent / "tutorial"
     assert (tutorial_dir / "tutorial_definition.json").exists()
+    assert (tutorial_dir / "source_interpretation.json").exists()
     assert (tutorial_dir / "lesson_outline.json").exists()
     assert (tutorial_dir / "evidence_map.json").exists()
     assert (tutorial_dir / "frame_selection_plan.json").exists()
@@ -99,7 +108,116 @@ def test_tutorial_pipeline_publishes_and_records_agent_versions(tmp_path) -> Non
     assert manifest["human_outline_approved"] is True
     assert manifest["publish_eligible"] is True
     assert manifest["agents"]["educator"]["skills"]
+    assert manifest["agents"]["source-interpreter"]["skills"]
+    assert (summary.tutorial_dir / "source_interpretation.json").exists()
     assert (summary.tutorial_dir / "tutorial_final.md").exists()
+
+
+def test_source_interpretation_stage_runs_and_is_recorded(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Run the transcript pipeline on a channel.",
+                    "learner_payoff": (
+                        "Get transcript artifacts without manual scraping."
+                    ),
+                    "best_first_action": "Run the pipeline command with a config file.",
+                    "steps_to_emphasize": [
+                        "Run the command",
+                        "Inspect the generated transcript artifacts",
+                    ],
+                    "steps_to_demote": [
+                        "Desktop setup",
+                        "project folder naming",
+                    ],
+                    "incidental_context": ["The video was recorded on a Mac mini."],
+                    "terminology_notes": ["Use Codex, not codecs."],
+                }
+            ],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(bundle_path=bundle_path, approve_outline=True)
+
+    assert "tutorial.source-interpretation" in llm.calls
+    interpretation = json.loads(
+        (summary.tutorial_dir / "source_interpretation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert interpretation["best_first_action"] == (
+        "Run the pipeline command with a config file."
+    )
+    assert "codecs" not in json.dumps(interpretation).lower()
+    assert "Codex" in json.dumps(interpretation)
+
+
+def test_source_interpretation_demotes_setup_first_action(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Build and run the transcript pipeline.",
+                    "learner_payoff": "Understand the workflow and produce output.",
+                    "best_first_action": "Create a new project folder.",
+                    "steps_to_emphasize": [
+                        "Create a new project folder.",
+                        "Run the pipeline command against a configured target.",
+                    ],
+                    "steps_to_demote": ["Remote desktop details."],
+                    "incidental_context": ["The recording used a Mac mini."],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    interpretation = json.loads(
+        (summary.tutorial_dir / "source_interpretation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert interpretation["best_first_action"] == (
+        "Run the pipeline command against a configured target."
+    )
+    assert "Create a new project folder." in interpretation["steps_to_demote"]
 
 
 def test_adversarial_findings_trigger_reroute_and_recover(tmp_path) -> None:
@@ -573,6 +691,823 @@ def test_each_major_section_requires_back_to_top_link(tmp_path) -> None:
     assert any("Run the command" in message for message in messages)
 
 
+def test_validator_flags_incidental_setup_before_core_workflow(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Get Connected",
+                            "goal": "Join the machine",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "SSH into the remote machine",
+                                    "instruction": (
+                                        "Open an SSH session to the remote desktop "
+                                        "machine used for recording."
+                                    ),
+                                    "assumptions": ["SSH access is available."],
+                                    "text_only_allowed": False,
+                                },
+                                {
+                                    "step_id": "step-2",
+                                    "title": "Run the command",
+                                    "instruction": "Run the command from the workflow.",
+                                    "assumptions": ["A shell is available."],
+                                    "text_only_allowed": False,
+                                },
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "SSH into the machine.",
+                            "assumptions": ["SSH access is available."],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Run the command.",
+                            "assumptions": ["A shell is available."],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [_visual_with_two_steps()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                (
+                    '<a id="top"></a>\n\n'
+                    "# Demo Tutorial\n\n"
+                    "## What This Tutorial Is For\n\n"
+                    "This tutorial shows the real workflow and why it matters.\n\n"
+                    "## Table of Contents\n\n"
+                    "- [SSH into the remote machine](#ssh-into-the-remote-machine)\n"
+                    "- [Run the command](#run-the-command)\n\n"
+                    '<a id="ssh-into-the-remote-machine"></a>\n\n'
+                    "## SSH into the remote machine\n\n"
+                    "Open an SSH session to the machine used for recording.\n\n"
+                    "![Terminal window prepared for the command.]"
+                    "(../frames/000000.jpg)\n\n"
+                    "[Back to top](#top)\n\n"
+                    '<a id="run-the-command"></a>\n\n'
+                    "## Run the command\n\n"
+                    "Run the command from the workflow.\n\n"
+                    "![Command running in the terminal.](../frames/000001.jpg)\n\n"
+                    "[Back to top](#top)\n"
+                )
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "incidental_setup_priority" in categories
+
+
+def test_validator_flags_outline_when_it_ignores_interpreted_first_action(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Run the transcript pipeline.",
+                    "learner_payoff": "Generate transcript artifacts.",
+                    "best_first_action": "Inspect the generated artifacts.",
+                    "steps_to_emphasize": [
+                        "Inspect the generated artifacts.",
+                        "Verify the generated transcript output.",
+                    ],
+                    "steps_to_demote": [
+                        "Create a new project folder.",
+                    ],
+                    "incidental_context": ["The video was recorded remotely."],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Get Started",
+                            "goal": "Start the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "Create a new project folder",
+                                    "instruction": (
+                                        "Create a new project folder before "
+                                        "doing anything else."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                },
+                                {
+                                    "step_id": "step-2",
+                                    "title": "Run the pipeline command",
+                                    "instruction": "Run the pipeline command.",
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                },
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Create the folder.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Run the pipeline command.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [_visual_with_two_steps()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                (
+                    '<a id="top"></a>\n\n'
+                    "# Demo Tutorial\n\n"
+                    "## What This Tutorial Is For\n\n"
+                    "This tutorial shows how to run the workflow.\n\n"
+                    "## Table of Contents\n\n"
+                    "- [Create a new project folder](#create-a-new-project-folder)\n"
+                    "- [Run the pipeline command](#run-the-pipeline-command)\n\n"
+                    '<a id="create-a-new-project-folder"></a>\n\n'
+                    "## Create a new project folder\n\n"
+                    "Create a new project folder before doing anything else.\n\n"
+                    "![Terminal window prepared for the command.]"
+                    "(../frames/000000.jpg)\n\n"
+                    "[Back to top](#top)\n\n"
+                    '<a id="run-the-pipeline-command"></a>\n\n'
+                    "## Run the pipeline command\n\n"
+                    "Run the pipeline command.\n\n"
+                    "![Command running in the terminal.](../frames/000001.jpg)\n\n"
+                    "[Back to top](#top)\n"
+                )
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "outline_misaligned_with_interpretation" in categories
+    assert "outline_promotes_demoted_setup" in categories
+
+
+def test_outline_normalization_reorders_same_section_to_best_first_action(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Use AI to plan the transcript project.",
+                    "learner_payoff": "Start the project with the right workflow.",
+                    "best_first_action": (
+                        "Engage the AI as a co-thinker to define project goals."
+                    ),
+                    "steps_to_emphasize": [
+                        "Engage the AI as a co-thinker to define project goals.",
+                        "Review the product definition.",
+                    ],
+                    "steps_to_demote": [
+                        "Create a new project folder.",
+                    ],
+                    "incidental_context": ["The demo was recorded remotely."],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Introduction",
+                            "goal": "Orient the reader",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "What This Tutorial Is For",
+                                    "instruction": "This tutorial shows the workflow.",
+                                    "assumptions": [],
+                                    "text_only_allowed": True,
+                                }
+                            ],
+                        },
+                        {
+                            "section_id": "section-2",
+                            "title": "Getting Started",
+                            "goal": "Start the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-2",
+                                    "title": "Create a new project folder",
+                                    "instruction": "Create a new project folder.",
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                },
+                                {
+                                    "step_id": "step-3",
+                                    "title": (
+                                        "Engage AI as a co-thinker to define "
+                                        "project goals"
+                                    ),
+                                    "instruction": (
+                                        "Start a conversation with the AI to "
+                                        "define the project goals."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                },
+                            ],
+                        },
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Orientation.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Create a folder.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-3",
+                            "segment_indexes": [2],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Engage the AI.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": None,
+                            "caption": "",
+                            "alt_text": "",
+                            "support_strength": "text_only",
+                            "text_only": True,
+                            "text_only_reason": "Intro is text only.",
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "selected_frame_path": "frames/000000.jpg",
+                            "caption": "Project folder setup.",
+                            "alt_text": "Project folder setup.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-3",
+                            "selected_frame_path": "frames/000001.jpg",
+                            "caption": "AI planning conversation.",
+                            "alt_text": "AI planning conversation.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    outline = json.loads(
+        (summary.tutorial_dir / "lesson_outline.json").read_text(encoding="utf-8")
+    )
+    actionable_titles = [
+        step["title"]
+        for section in outline["sections"]
+        for step in section["steps"]
+        if not step["text_only_allowed"]
+    ]
+    assert actionable_titles[0] == "Engage AI as a co-thinker to define project goals"
+
+
+def test_outline_normalization_moves_best_first_action_ahead_of_text_only_setup(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Use AI to plan the transcript project.",
+                    "learner_payoff": "Start with the real workflow.",
+                    "best_first_action": (
+                        "Engage the AI as a co-thinker to define project goals."
+                    ),
+                    "steps_to_emphasize": [
+                        "Engage the AI as a co-thinker to define project goals."
+                    ],
+                    "steps_to_demote": ["Create a new project folder."],
+                    "incidental_context": [],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Introduction",
+                            "goal": "Orient the reader",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "What This Tutorial Is For",
+                                    "instruction": "This tutorial shows the workflow.",
+                                    "assumptions": [],
+                                    "text_only_allowed": True,
+                                }
+                            ],
+                        },
+                        {
+                            "section_id": "section-2",
+                            "title": "Getting Started",
+                            "goal": "Start the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-2",
+                                    "title": "Create a new project folder",
+                                    "instruction": "Create a new project folder.",
+                                    "assumptions": [],
+                                    "text_only_allowed": True,
+                                },
+                                {
+                                    "step_id": "step-3",
+                                    "title": (
+                                        "Engage AI as a co-thinker to define "
+                                        "project goals"
+                                    ),
+                                    "instruction": (
+                                        "Start a conversation with the AI to "
+                                        "define the project goals."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                },
+                            ],
+                        },
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Orientation.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Create a folder.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-3",
+                            "segment_indexes": [2],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Engage the AI.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": None,
+                            "caption": "",
+                            "alt_text": "",
+                            "support_strength": "text_only",
+                            "text_only": True,
+                            "text_only_reason": "Intro is text only.",
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "selected_frame_path": None,
+                            "caption": "",
+                            "alt_text": "",
+                            "support_strength": "text_only",
+                            "text_only": True,
+                            "text_only_reason": "Folder setup is context only.",
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-3",
+                            "selected_frame_path": "frames/000001.jpg",
+                            "caption": "AI planning conversation.",
+                            "alt_text": "AI planning conversation.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    outline = json.loads(
+        (summary.tutorial_dir / "lesson_outline.json").read_text(encoding="utf-8")
+    )
+    step_titles = [step["title"] for step in outline["sections"][1]["steps"]]
+    assert step_titles == [
+        "Engage AI as a co-thinker to define project goals",
+        "Create a new project folder",
+    ]
+
+
+def test_outline_validation_ignores_intro_context_for_best_first_alignment(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Use AI to plan the transcript project.",
+                    "learner_payoff": "Start with the real workflow.",
+                    "best_first_action": (
+                        "Engage the AI as a co-thinker to define project goals."
+                    ),
+                    "steps_to_emphasize": [
+                        "Engage the AI as a co-thinker to define project goals."
+                    ],
+                    "steps_to_demote": [],
+                    "incidental_context": [],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Introduction",
+                            "goal": "Orient the reader",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "What This Tutorial Is For",
+                                    "instruction": "This tutorial shows the workflow.",
+                                    "assumptions": [],
+                                    "text_only_allowed": True,
+                                }
+                            ],
+                        },
+                        {
+                            "section_id": "section-2",
+                            "title": "Getting Started",
+                            "goal": "Start the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-2",
+                                    "title": (
+                                        "Engage AI as a co-thinker to define "
+                                        "project goals"
+                                    ),
+                                    "instruction": (
+                                        "Start a conversation with the AI to "
+                                        "define the project goals."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                }
+                            ],
+                        },
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Orientation.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Engage the AI.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": None,
+                            "caption": "",
+                            "alt_text": "",
+                            "support_strength": "text_only",
+                            "text_only": True,
+                            "text_only_reason": "Intro is text only.",
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "selected_frame_path": "frames/000001.jpg",
+                            "caption": "AI planning conversation.",
+                            "alt_text": "AI planning conversation.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "outline_misaligned_with_interpretation" not in categories
+
+
+def test_outline_copyedits_known_term_confusions(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Start with AI codecs",
+                            "goal": "Use codecs in the workflow",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "Open GPT codecs",
+                                    "instruction": (
+                                        "Use AI codecs to plan the workflow."
+                                    ),
+                                    "assumptions": [
+                                        "GPT codecs is available in your account."
+                                    ],
+                                    "text_only_allowed": True,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    outline = json.loads(
+        (summary.tutorial_dir / "lesson_outline.json").read_text(encoding="utf-8")
+    )
+    outline_text = json.dumps(outline)
+    assert "codecs" not in outline_text.lower()
+    assert "Codex" in outline_text
+
+
+def test_step_title_representation_uses_slug_and_keyword_signal(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                (
+                    '<a id="top"></a>\n\n'
+                    "# Demo Tutorial\n\n"
+                    "## What This Tutorial Is For\n\n"
+                    "This tutorial shows you what the workflow does and what "
+                    "you get from it.\n\n"
+                    "## Table of Contents\n\n"
+                    "- [Open the terminal](#open-the-terminal)\n\n"
+                    '<a id="open-the-terminal"></a>\n\n'
+                    "## Get Ready\n\n"
+                    "Open the terminal and run the command shown in the video.\n\n"
+                    "![Terminal window prepared for the command.]"
+                    "(../frames/000000.jpg)\n\n"
+                    "*Terminal ready for the command.*\n\n"
+                    "[Back to top](#top)\n"
+                )
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(bundle_path=bundle_path, approve_outline=True)
+
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    messages = [finding["message"] for finding in validation["findings"]]
+    assert "Step title is not clearly represented in the draft." not in messages
+
+
 def test_validation_findings_do_not_skip_other_reviews(tmp_path) -> None:
     bundle_path = _make_bundle(tmp_path)
     agents_dir, skills_dir = _make_agent_files(tmp_path)
@@ -648,6 +1583,63 @@ def test_validation_findings_do_not_skip_other_reviews(tmp_path) -> None:
     assert adversarial.get("skipped") is not True
     assert technical["findings"]
     assert adversarial["findings"]
+
+
+def test_failure_messages_are_deduplicated_across_reports(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    repeated_message = "The opening still reads like project notes."
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [
+                _technical_review(
+                    attention_required=True,
+                    findings=[
+                        {
+                            "severity": "medium",
+                            "category": "tutorial_quality",
+                            "message": repeated_message,
+                            "step_id": "step-1",
+                            "reroute_target": "script-writer",
+                        }
+                    ],
+                )
+            ],
+            "tutorial.adversarial-review": [
+                _adversarial_review(
+                    attention_required=True,
+                    findings=[
+                        {
+                            "severity": "high",
+                            "category": "learner_confusion",
+                            "message": repeated_message,
+                            "step_id": "step-1",
+                            "reroute_target": "script-writer",
+                        }
+                    ],
+                )
+            ],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.failures == [repeated_message]
 
 
 def test_visual_editor_reroute_continues_and_recovers(tmp_path) -> None:
@@ -839,6 +1831,10 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
         "educator.md": (
             "# Agent: educator\n\nSkills:\n- definition-of-done\n- grounding\n"
         ),
+        "source-interpreter.md": (
+            "# Agent: source-interpreter\n\n"
+            "Skills:\n- tutorial-interpretation\n- grounding\n"
+        ),
         "tutorial-planner.md": (
             "# Agent: tutorial-planner\n\n"
             "Skills:\n- tutorial-planning\n- tutorial-step-selection\n"
@@ -873,6 +1869,7 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
         "definition-of-done.md": "definition",
         "grounding.md": "grounding",
         "tutorial-planning.md": "planning",
+        "tutorial-interpretation.md": "interpretation",
         "tutorial-step-selection.md": "step selection",
         "tutorial-narrative.md": "narrative",
         "evidence-mapping.md": "evidence",
@@ -917,6 +1914,26 @@ def _definition(**overrides) -> dict[str, object]:
     }
     definition.update(overrides)
     return definition
+
+
+def _source_interpretation() -> dict[str, object]:
+    return {
+        "core_workflow": "Run the transcript pipeline and inspect the outputs.",
+        "learner_payoff": "Generate transcript artifacts without manual scraping.",
+        "best_first_action": "Run the pipeline command against a configured target.",
+        "steps_to_emphasize": [
+            "Run the pipeline command",
+            "Inspect the generated artifacts",
+        ],
+        "steps_to_demote": [
+            "Project folder setup",
+            "Recording environment details",
+        ],
+        "incidental_context": [
+            "The video was recorded on a desktop machine.",
+        ],
+        "terminology_notes": ["Use Codex for the OpenAI coding tool name."],
+    }
 
 
 def _outline() -> dict[str, object]:

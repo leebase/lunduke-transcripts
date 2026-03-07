@@ -6,6 +6,117 @@
 
 ---
 
+## 2026-03-07 — Sprint 11 Prompt and Validator Pedagogy Pass
+
+Implemented the first concrete Sprint 11 pass by tightening planner/writer/reviewer
+guidance around learner-first sequencing, adding validator heuristics for
+incidental setup-first outlines, and reducing duplicated low-signal warning
+noise in tutorial reruns.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Planner prompts | Strengthened the planner instructions so the first actionable section should start with the core workflow and demote scaffolding such as remote access, recording context, and setup chores |
+| Writer/reviewer prompts | Tightened writer, technical reviewer, and adversarial reviewer prompts around payoff, public-tutorial voice, and calling out setup-first lesson structure |
+| Validator heuristics | Added an outline-level `incidental_setup_priority` finding when the first actionable step foregrounds setup while later steps contain the actual workflow |
+| Warning quality | Reduced low-signal warning churn by making step-title representation checks accept slug/keyword matches and deduplicating repeated failure/advisory messages |
+| Outline copy edits | Normalized obvious `Codex`/`codecs` confusion inside normalized lesson outlines so planner output no longer feeds known homophone mistakes downstream in tests |
+| Regression coverage | Added tests for incidental-setup detection, outline terminology normalization, more forgiving step-title representation, and failure-message deduplication |
+
+### Why It Matters
+
+- Moves Sprint 11 beyond prompt aspirations by making pedagogy problems visible
+  in machine-readable validation output.
+- Cuts repeated structural noise so remaining warning sets better reflect real
+  teaching and sequencing problems.
+- Improves upstream planner artifacts, not just the final Markdown, which gives
+  the writer a cleaner lesson structure to work from.
+
+### How to Verify
+
+1. Run targeted checks:
+   - `./.venv/bin/pytest -q tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/ruff check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/black --check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+2. Confirm the new validator behavior in tests:
+   - incidental setup first is reported as `incidental_setup_priority`
+   - outline JSON normalizes obvious `codecs` references to `Codex`
+   - repeated identical review messages collapse to one failure message
+3. Run the live screencast tutorial flow:
+   - `./.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --reprocess --max-review-cycles 0 --config config/channels.toml --env-file .env`
+4. Note the current live result:
+   - the router-backed screencast run still lingered and had to be killed manually after refreshing only part of the artifact set, so Sprint 11 content work is progressing but the live-run reliability issue remains open
+
+### Follow-on Validation
+
+- Added a new `source-interpreter` tutorial stage plus `source_interpretation.json`
+  so planning gets an explicit "what is this video really teaching?" artifact.
+- Updated router config so the new stage resolves to an explicit
+  `tutorial_interpreter` role during live runs.
+- Re-ran the real `AgentFlowComplete_compressed.mp4` flow and confirmed:
+  - `source_interpretation.json` refreshed successfully
+  - `lesson_outline.json` refreshed again through the planner
+  - planner output no longer leaked `codecs` terminology
+  - the outline still begins with project-folder/setup work rather than the
+    core transcript-processing workflow
+  - the CLI process still lingered and needed to be killed manually
+- Tightened the source-interpretation contract again so setup-first
+  `best_first_action` values are normalized toward the first substantive
+  emphasized action, and outline normalization now deterministically realigns
+  the first actionable step to the interpreted first action when the planner
+  still leaves setup first.
+- Re-ran the live screencast flow through the workspace codepath
+  (`PYTHONPATH=src`) and confirmed the refreshed outline now starts with
+  `Engage AI as a Co-Thinker to Define Project Goals` instead of project-folder
+  creation.
+- The router-backed CLI process still lingered after artifact refresh and had
+  to be killed manually, so the pedagogy fix is improved but the runtime
+  reliability bug remains open.
+- Added a CLI-side stale-artifact cleanup for `tutorial --reprocess` so old
+  `tutorial_manifest.json`, `tutorial_final.md`, `tutorial_final.html`,
+  `tutorial_final.pdf`, and `render_manifest.json` are removed before a fresh
+  rerun begins.
+- Added regression coverage proving a reprocess tutorial run clears stale final
+  tutorial/render outputs before invoking the pipeline, preventing an
+  interrupted rerun from looking like a fresh publish with an older PDF.
+- Test As Lee then pushed the live reliability path further:
+  - added a wall-clock timeout wrapper around routed tutorial tasks in
+    `src/lunduke_transcripts/infra/llm_adapter.py`
+  - taught the adapter to surface wrapped `lee-llm-router` timeouts as
+    `llm_router_timeout[...]` instead of an empty
+    `llm_router_request_failed[...]` message
+  - widened the default routed tutorial timeout budget in
+    `config/channels.toml` and both router YAMLs from 60s to 120s so the real
+    `tutorial.evidence` stage has enough headroom to finish consistently
+  - added regression coverage for wrapped router timeout detection and blank
+    router-error cause reporting
+- Tightened planner/writer skills and prompt contracts again so:
+  - generic `why this matters` / `by the end` copy should stay compact instead
+    of becoming standalone outline steps unless the source clearly teaches it
+  - speculative extension / future-work steps should not be planned unless the
+    transcript actually demonstrates them
+  - public drafts should not add top-level scaffolding sections like
+    `Text-Only and Visual Notes`
+- Hardened outline normalization and validation so:
+  - the interpreted `best_first_action` can move ahead of leading text-only
+    setup inside the first actionable section
+  - intro/context-only opening copy no longer triggers a false
+    `outline_misaligned_with_interpretation` finding
+- Re-ran the full default Lee path on the real screencast multiple times using
+  `PYTHONPATH=src ./.venv/bin/python -m lunduke_transcripts.main tutorial ...`
+  and confirmed:
+  - the end-to-end CLI now exits cleanly instead of lingering
+  - fresh `tutorial_final.md`, `tutorial_final.html`, `tutorial_final.pdf`, and
+    `render_manifest.json` are regenerated together
+  - the first actionable section now starts with AI planning instead of folder
+    setup
+  - the tutorial is still **not** Lee-approved: it remains too summary-like,
+    too disclaimer-heavy, and still lacks minimally actionable prompt/artifact
+    examples for core workflow steps
+
+---
+
 ## 2026-03-07 — Published Tutorial Runs Now Refresh Final PDF Artifacts
 
 Fixed the stale-final-artifact gap by making the `tutorial` CLI invoke the

@@ -20,28 +20,35 @@ llm:
       model: openai/gpt-4.1-mini
       temperature: 0.2
       json_mode: true
-      timeout: 60.0
+      timeout: 120.0
+
+    tutorial_interpreter:
+      provider: openrouter
+      model: openai/gpt-4.1-mini
+      temperature: 0.2
+      json_mode: true
+      timeout: 120.0
 
     tutorial_planner:
       provider: openrouter
       model: openai/gpt-4.1-mini
       temperature: 0.2
       json_mode: true
-      timeout: 60.0
+      timeout: 120.0
 
     tutorial_evidence:
       provider: openrouter
       model: openai/gpt-4.1-mini
       temperature: 0.1
       json_mode: true
-      timeout: 60.0
+      timeout: 120.0
 
     tutorial_visual:
       provider: openrouter
       model: openai/gpt-4.1-mini
       temperature: 0.1
       json_mode: true
-      timeout: 60.0
+      timeout: 120.0
 
     tutorial_writer:
       provider: codex_subscription

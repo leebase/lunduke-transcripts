@@ -30,7 +30,7 @@ pdf_engine_binary = "chromium"
 provider = "openrouter"
 model = "openai/gpt-4.1-mini"
 prompt_version = "v1"
-timeout_seconds = 60
+timeout_seconds = 120
 retries = 2
 retry_backoff_seconds = 2
 router_enabled = false
@@ -39,6 +39,7 @@ router_config_path = "config/tutorial-llm-router.yaml"
 
 [llm.router_roles]
 "tutorial.educator" = "tutorial_educator"
+"tutorial.source-interpretation" = "tutorial_interpreter"
 "tutorial.planner" = "tutorial_planner"
 "tutorial.evidence" = "tutorial_evidence"
 "tutorial.visual" = "tutorial_visual"
