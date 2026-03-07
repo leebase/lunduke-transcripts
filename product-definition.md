@@ -151,20 +151,23 @@ Per processed video, persist:
   - review responder
 - Agent and skill definitions must be editable without changing orchestration code.
 
-### FR-13: Tutorial Workflow Gates
+### FR-13: Tutorial Workflow Cooperation
 - Tutorial generation must follow this workflow:
   - define done
   - plan
   - draft
   - validate
   - review
-  - respond to review
+- respond to review
   - publish
 - The outline package must require explicit human approval before drafting
   continues.
-- Adversarial review must be mandatory before the tutorial is publish-eligible.
-- The pipeline must produce machine-readable review and revision artifacts when a
-  tutorial is blocked.
+- Validation, technical review, and adversarial review must all run before the
+  tutorial is considered complete.
+- Review stages are co-editors, not go/no-go gates.
+- Editorial findings must be captured as machine-readable review and revision
+  artifacts, but they must not suppress later editorial stages or prevent a
+  fresh latest tutorial artifact from being written after outline approval.
 
 ### FR-14: Tutorial Outputs
 - The first downstream tutorial target is written Markdown.
@@ -179,9 +182,9 @@ Per processed video, persist:
   - `adversarial_review_report.json`
   - `tutorial_revision_plan.json`
   - `tutorial_manifest.json`
-  - `tutorial_final.md` when publish-eligible
+  - `tutorial_final.md`
 - The tutorial manifest must record prompt/skill versions, review outcomes, human
-  approval state, and publish eligibility.
+  approval state, and review warnings/outcomes for the latest run.
 
 ### FR-9: Execution Modes
 - Manual mode: run once now.

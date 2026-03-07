@@ -510,11 +510,7 @@ def tutorial_command(args: argparse.Namespace) -> int:
             "failures": summary.failures,
         }
         print(json.dumps(payload, indent=2))
-        return (
-            0
-            if summary.publish_eligible or summary.status == "awaiting_outline_approval"
-            else 1
-        )
+        return 0
     except Exception as exc:  # noqa: BLE001
         print(
             json.dumps(
@@ -572,7 +568,13 @@ def _resolve_config_relative_path(value: str | None, config_dir: Path) -> str | 
     path = Path(value).expanduser()
     if path.is_absolute():
         return str(path)
-    return str((config_dir / path).resolve())
+    config_relative = (config_dir / path).resolve()
+    if config_relative.exists():
+        return str(config_relative)
+    repo_relative = (_repo_root() / path).resolve()
+    if path.parts[:1] == ("config",) and repo_relative.exists():
+        return str(repo_relative)
+    return str(config_relative)
 
 
 def main() -> None:

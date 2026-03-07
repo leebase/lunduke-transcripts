@@ -19,8 +19,8 @@ Assumptions:
 
 ## Sprint 10 — Tutorial Quality Refinement
 
-**Status**: ⏳ In Progress (2026-03-07)  
-**Goal**: Improve public tutorial quality so outputs read like real tutorials instead of transcript-shaped artifacts, while routing the expensive tutorial stages through a stronger model and keeping the real screencast loop reliable.
+**Status**: ✅ Completed (2026-03-07)  
+**Goal**: Improve public tutorial quality so outputs read like real tutorials instead of transcript-shaped artifacts, while routing the expensive tutorial stages through a stronger model and converting the reviewer stages into advisory co-editors that always produce a fresh latest artifact.
 
 ### Scope
 
@@ -46,23 +46,52 @@ Assumptions:
   - per-section back-to-top validation
 - [x] Run formal code review and remediate findings
 - [x] Fix the live LLM review-stage stall exposed by real screencast reruns
-- [ ] Retune planning/writing so incidental environment setup does not dominate the tutorial flow
-- [ ] Decide whether blocked tutorial runs should still render a draft PDF for human review
+- [x] Remove tutorial hard-block semantics from validation and technical review
+- [x] Always run technical and adversarial review, even when validation finds defects
+- [x] Always write a fresh latest tutorial artifact after outline approval, with review warnings in the manifest instead of `blocked` tutorial status
+- [x] Fix tutorial reroute handling so `script-writer` and `visual-editor` reroutes continue cleanly
+- [x] Update CLI/docs/status semantics so editorial issues no longer return an error exit code
+- [x] Retune planning/writing so incidental environment setup is explicitly discouraged and called out in review prompts
+- [x] Republish the `AgentFlowComplete_compressed.mp4` tutorial as fresh Markdown + PDF under the new advisory co-editor flow
 
 ### Delivery Notes
 
 - The public Markdown contract is now stricter: internal grounding artifacts stay in JSON sidecars, not the final tutorial.
 - The draft for `AgentFlowComplete_compressed.mp4` now includes context, a table of contents, and back-to-top navigation, and no longer leaks evidence blocks.
-- Expensive tutorial stages now run through `lee-llm-router`, with cheap planning/evidence stages staying on cheaper OpenRouter roles and writer/reviewer/red-team using ChatGPT Plus `gpt-5.4`.
-- Test As Lee now completes the full screencast review loop cleanly. The current `AgentFlowComplete_compressed.mp4` rerun ends as `blocked` because the tutorial still fails validation/review, not because the runtime hangs.
-- Because the screencast rerun blocked, `tutorial_final.md` / `tutorial_final.pdf` were not republished; the latest fresh artifact from this run is `tutorial_draft.md`.
+- Expensive tutorial stages now run through `lee-llm-router`, with cheap planning/evidence stages staying on cheaper OpenRouter roles and the default ChatGPT Plus routing narrowed to writer + technical reviewer for reliability.
+- Validation, technical review, and adversarial review now act as co-editors. They always run, produce machine-readable findings, and surface warnings without blocking fresh final artifacts.
+- Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF and verified the updated timestamps.
+- Real-user reliability fixes in this sprint included config-relative router path fallback, wall-clock timeout hardening in `lee-llm-router`, and default router-role tuning to avoid a slow adversarial stage on the subscription path.
 
 ### Acceptance Criteria
 
 1. Published tutorials read like public tutorials rather than organized transcript notes.
 2. Final Markdown never leaks `Evidence:` blocks or internal review language.
 3. Navigation requirements are enforced consistently and can be relaxed only through the tutorial definition flags.
-4. Real screencast reruns complete the full draft → review loop without hanging, even when the result is `blocked`.
+4. Real screencast reruns complete the full draft → review loop without hanging and always produce a fresh latest Markdown artifact after outline approval.
+5. Editorial findings are preserved as machine-readable warnings and reroute hints, not as tutorial-quality vetoes.
+6. The real `AgentFlowComplete_compressed.mp4` flow republishes fresh Markdown and PDF artifacts under the advisory co-editor model.
+
+---
+
+## Sprint 11 — Tutorial Pedagogy and Ghostwriting Quality
+
+**Status**: ⏳ Planned  
+**Goal**: Improve the published tutorial itself so it teaches the underlying workflow cleanly, sounds like the speaker coached by a top-notch educator, and demotes incidental environment/setup details.
+
+### Scope
+
+- [ ] Improve planner step selection so remote-access and recording context do not become core steps unless required
+- [ ] Strengthen writer prompts and skills around context, payoff, and learner-oriented sequencing
+- [ ] Tighten technical/adversarial review prompts around “is this actually a good public tutorial?”
+- [ ] Reduce repeated “step title not represented” and similar low-signal findings in the final warning set
+- [ ] Re-run `AgentFlowComplete_compressed.mp4` and compare quality against the current refreshed Markdown/PDF
+
+### Acceptance Criteria
+
+1. The first actionable section starts with the real workflow instead of environmental setup.
+2. The opening context explains what the tutorial is for and why it matters in a tighter, more public-facing way.
+3. The final Markdown reads less like project notes and more like an authored tutorial in the speaker’s voice.
 
 ---
 

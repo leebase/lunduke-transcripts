@@ -6,6 +6,54 @@
 
 ---
 
+## 2026-03-07 — Advisory Co-Editor Tutorial Flow Closed Out
+
+Closed Sprint 10 by converting tutorial validation/review into advisory
+co-editors, republishing the real screencast tutorial, and hardening the
+router-backed live path that Test As Lee exposed.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Tutorial semantics | Removed tutorial-quality `blocked` outcomes; validation, technical review, and adversarial review now always run and record warnings instead of vetoing fresh final artifacts |
+| Pipeline control flow | Fixed reroute handling so `script-writer` and `visual-editor` reroutes continue cleanly instead of risking a fall-through return |
+| CLI/user contract | Tutorial runs now exit successfully for editorial-warning outcomes and always write a fresh `tutorial_final.md` after outline approval |
+| Manifesting | `tutorial_manifest.json` now records editorial attention/warning counts instead of hard-block semantics |
+| Router reliability | Added repo-root fallback for `config/...` router assets, added a wall-clock timeout guard in `lee-llm-router`, and narrowed the default ChatGPT Plus routing to writer + technical reviewer |
+| Live artifacts | Re-ran `AgentFlowComplete_compressed.mp4` and refreshed `tutorial_final.md`, `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json` |
+
+### Why It Matters
+
+- Matches the product direction: tutorial stages are now co-editors, not
+  go/no-go deciders.
+- Prevents the stale-artifact confusion where a new run could finish without
+  producing a fresh public tutorial file.
+- Keeps the stronger model on the highest-value editorial work while improving
+  reliability of the real screencast workflow.
+
+### How to Verify
+
+1. Run checks:
+   - `./.venv/bin/pytest -q`
+   - `./.venv/bin/ruff check src tests`
+   - `./.venv/bin/black --check src tests`
+   - `./.venv/bin/pytest -q tests/test_providers.py` in `~/projects/lee-llm-router`
+2. Regenerate the real screencast tutorial:
+   - `./.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --reprocess --max-review-cycles 0 --config config/channels.toml --env-file .env`
+3. Render the refreshed final tutorial:
+   - `./.venv/bin/python -m lunduke_transcripts.main render --manifest data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_manifest.json --target pdf --config config/channels.toml --env-file .env`
+4. Verify fresh timestamps on:
+   - `tutorial_final.md`
+   - `tutorial_final.pdf`
+   - `tutorial_manifest.json`
+   - `render_manifest.json`
+5. Inspect `tutorial_manifest.json` and confirm:
+   - `status = "published"`
+   - `publish_eligible = true`
+   - `review_outcomes.editorial_attention_required = true`
+   - blocked flags are all `false`
+
 ## 2026-03-07 — Selective ChatGPT Plus GPT-5.4 Tutorial Routing
 
 Integrated `lee-llm-router` into the tutorial pipeline so the expensive

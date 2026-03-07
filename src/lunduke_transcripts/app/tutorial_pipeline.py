@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -208,6 +209,7 @@ class TutorialPipeline:
 
             validation_report = _validate_tutorial(
                 tutorial_dir=tutorial_dir,
+                definition=definition,
                 outline=outline,
                 evidence_map=evidence_map,
                 frame_selection_plan=frame_selection_plan,
@@ -218,32 +220,22 @@ class TutorialPipeline:
                 tutorial_dir / "tutorial_validation_report.json", validation_report
             )
 
-            if validation_report["overall_blocked"]:
-                technical_review_report = _skipped_review_report(
-                    "technical-reviewer",
-                    "blocked_by_validation",
-                )
-                adversarial_review_report = _skipped_review_report(
-                    "adversarial-reviewer",
-                    "blocked_by_validation",
-                )
-            else:
-                technical_review_report = self._run_technical_review(
-                    definition=definition,
-                    outline=outline,
-                    evidence_map=evidence_map,
-                    frame_selection_plan=frame_selection_plan,
-                    draft_markdown=draft_markdown,
-                    validation_report=validation_report,
-                )
-                adversarial_review_report = self._run_adversarial_review(
-                    definition=definition,
-                    outline=outline,
-                    evidence_map=evidence_map,
-                    frame_selection_plan=frame_selection_plan,
-                    draft_markdown=draft_markdown,
-                    validation_report=validation_report,
-                )
+            technical_review_report = self._run_technical_review(
+                definition=definition,
+                outline=outline,
+                evidence_map=evidence_map,
+                frame_selection_plan=frame_selection_plan,
+                draft_markdown=draft_markdown,
+                validation_report=validation_report,
+            )
+            adversarial_review_report = self._run_adversarial_review(
+                definition=definition,
+                outline=outline,
+                evidence_map=evidence_map,
+                frame_selection_plan=frame_selection_plan,
+                draft_markdown=draft_markdown,
+                validation_report=validation_report,
+            )
 
             _write_json(
                 tutorial_dir / "technical_review_report.json",
@@ -261,12 +253,21 @@ class TutorialPipeline:
             )
             _write_json(tutorial_dir / "tutorial_revision_plan.json", revision_plan)
 
-            blocked = bool(
-                validation_report["overall_blocked"]
-                or technical_review_report["overall_blocked"]
-                or adversarial_review_report["overall_blocked"]
+            validation_attention_required = _report_attention_required(
+                validation_report
             )
-            if not blocked:
+            technical_attention_required = _report_attention_required(
+                technical_review_report
+            )
+            adversarial_attention_required = _report_attention_required(
+                adversarial_review_report
+            )
+            editorial_attention_required = bool(
+                validation_attention_required
+                or technical_attention_required
+                or adversarial_attention_required
+            )
+            if not editorial_attention_required:
                 final_path = tutorial_dir / "tutorial_final.md"
                 final_path.write_text(draft_markdown, encoding="utf-8")
                 manifest = _build_manifest(
@@ -293,19 +294,21 @@ class TutorialPipeline:
                 )
 
             if review_cycles >= max_review_cycles:
+                final_path = tutorial_dir / "tutorial_final.md"
+                final_path.write_text(draft_markdown, encoding="utf-8")
                 final_failures = _collect_failure_messages(
                     validation_report,
                     technical_review_report,
                     adversarial_review_report,
                 )
                 manifest = _build_manifest(
-                    status="blocked",
+                    status="published",
                     tutorial_dir=tutorial_dir,
                     resolved_bundle=resolved_bundle,
                     inputs_signature=inputs_signature,
                     agent_manifest=agent_manifest,
                     human_outline_approved=True,
-                    publish_eligible=False,
+                    publish_eligible=True,
                     review_cycles=review_cycles,
                     validation_report=validation_report,
                     technical_review_report=technical_review_report,
@@ -313,11 +316,11 @@ class TutorialPipeline:
                 )
                 _write_json(manifest_path, manifest)
                 return TutorialSummary(
-                    status="blocked",
+                    status="published",
                     tutorial_dir=tutorial_dir,
                     manifest_path=manifest_path,
                     human_outline_approved=True,
-                    publish_eligible=False,
+                    publish_eligible=True,
                     review_cycles=review_cycles,
                     failures=final_failures,
                 )
@@ -422,6 +425,14 @@ class TutorialPipeline:
                     tutorial_dir / "frame_selection_plan.json",
                     frame_selection_plan,
                 )
+                continue
+
+            if rerun_from_stage == "script-writer":
+                continue
+
+            raise RuntimeError(
+                f"unsupported_tutorial_reroute_stage: {rerun_from_stage}"
+            )
 
     def _require_llm(self) -> None:
         if not self.llm.is_enabled():
@@ -619,6 +630,7 @@ def _resolve_artifact_path(bundle_path: Path, relative_path: object) -> Path | N
 def _validate_tutorial(
     *,
     tutorial_dir: Path,
+    definition: dict[str, Any],
     outline: dict[str, Any],
     evidence_map: dict[str, Any],
     frame_selection_plan: dict[str, Any],
@@ -626,6 +638,11 @@ def _validate_tutorial(
     agent_manifest: dict[str, Any],
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
+    structure_findings = _validate_public_tutorial_markdown(
+        draft_markdown,
+        definition,
+    )
+    findings.extend(structure_findings)
     evidence_steps = {
         entry["step_id"]: entry for entry in evidence_map.get("steps", [])
     }
@@ -721,11 +738,154 @@ def _validate_tutorial(
         "schema_version": "1",
         "validated_at": datetime.now(tz=UTC).isoformat(),
         "step_count": len(all_step_ids),
+        "attention_required": any(findings),
         "overall_blocked": any(
             finding["severity"] == "blocking" for finding in findings
         ),
         "findings": findings,
     }
+
+
+def _validate_public_tutorial_markdown(
+    draft_markdown: str,
+    definition: dict[str, Any],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    requires_context = bool(definition.get("context_section_required", True))
+    requires_toc = bool(definition.get("table_of_contents_required", True))
+    requires_back_to_top = bool(definition.get("back_to_top_links_required", True))
+
+    if requires_back_to_top and '<a id="top"></a>' not in draft_markdown:
+        findings.append(
+            _finding(
+                severity="blocking",
+                category="missing_top_anchor",
+                message="Final tutorial is missing the required top anchor.",
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    if requires_context and "## What This Tutorial Is For" not in draft_markdown:
+        findings.append(
+            _finding(
+                severity="blocking",
+                category="missing_context_section",
+                message="Final tutorial is missing the required context section.",
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    if requires_toc and "## Table of Contents" not in draft_markdown:
+        findings.append(
+            _finding(
+                severity="blocking",
+                category="missing_table_of_contents",
+                message="Final tutorial is missing the required table of contents.",
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    if requires_back_to_top:
+        sections_requiring_navigation = _sections_requiring_back_to_top(
+            draft_markdown,
+            requires_toc=requires_toc,
+        )
+        if not sections_requiring_navigation:
+            findings.append(
+                _finding(
+                    severity="blocking",
+                    category="missing_back_to_top_links",
+                    message=(
+                        "Final tutorial is missing major sections that can "
+                        "carry back-to-top navigation."
+                    ),
+                    step_id=None,
+                    reroute_target="script-writer",
+                )
+            )
+        else:
+            for section_title, section_body in sections_requiring_navigation:
+                if "[Back to top](#top)" not in section_body:
+                    findings.append(
+                        _finding(
+                            severity="blocking",
+                            category="missing_back_to_top_links",
+                            message=(
+                                "Section is missing the required back-to-top "
+                                f"link: {section_title}."
+                            ),
+                            step_id=None,
+                            reroute_target="script-writer",
+                        )
+                    )
+    if re.search(r"(^|\n)\s*>\s*\*\*Evidence:", draft_markdown):
+        findings.append(
+            _finding(
+                severity="blocking",
+                category="evidence_leakage",
+                message=(
+                    "Final tutorial leaks internal evidence callouts into "
+                    "the public artifact."
+                ),
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    if re.search(r"\bEvidence:\b", draft_markdown):
+        findings.append(
+            _finding(
+                severity="blocking",
+                category="evidence_leakage",
+                message=(
+                    "Final tutorial contains raw evidence labeling that "
+                    "should stay in sidecar artifacts."
+                ),
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    if re.search(r"\bthe speaker\b", draft_markdown, re.IGNORECASE):
+        findings.append(
+            _finding(
+                severity="medium",
+                category="transcript_leakage",
+                message=(
+                    "Final tutorial still narrates the source instead of "
+                    "teaching the workflow directly."
+                ),
+                step_id=None,
+                reroute_target="script-writer",
+            )
+        )
+    return findings
+
+
+def _sections_requiring_back_to_top(
+    draft_markdown: str,
+    *,
+    requires_toc: bool,
+) -> list[tuple[str, str]]:
+    heading_matches = list(re.finditer(r"(?m)^##\s+(.+)$", draft_markdown))
+    sections: list[tuple[str, str]] = []
+    for index, match in enumerate(heading_matches):
+        title = match.group(1).strip()
+        start = match.start()
+        end = (
+            heading_matches[index + 1].start()
+            if index + 1 < len(heading_matches)
+            else len(draft_markdown)
+        )
+        sections.append((title, draft_markdown[start:end]))
+
+    if not sections:
+        return []
+
+    if requires_toc:
+        for index, (title, _) in enumerate(sections):
+            if title.lower() == "table of contents":
+                return sections[index + 1 :]
+
+    return sections[1:]
 
 
 def _build_revision_plan(
@@ -755,13 +915,17 @@ def _build_revision_plan(
     elif any(target == "visual-editor" for target in by_target):
         rerun_from_stage = "visual-editor"
 
-    overall_blocked = any(
-        report and report.get("overall_blocked")
+    editorial_attention_required = any(
+        _report_attention_required(report)
         for report in (validation_report, technical_report, adversarial_report)
     )
     return {
         "schema_version": "1",
-        "overall_blocked": overall_blocked,
+        "overall_blocked": False,
+        "editorial_attention_required": editorial_attention_required,
+        "adversarial_attention_required": bool(
+            adversarial_report and adversarial_report.get("attention_required")
+        ),
         "rerun_from_stage": rerun_from_stage,
         "feedback_by_agent": by_target,
         "findings_considered": findings,
@@ -782,6 +946,11 @@ def _build_manifest(
     technical_review_report: dict[str, Any] | None,
     adversarial_review_report: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    validation_attention_required = _report_attention_required(validation_report)
+    technical_attention_required = _report_attention_required(technical_review_report)
+    adversarial_attention_required = _report_attention_required(
+        adversarial_review_report
+    )
     return {
         "schema_version": "1",
         "status": status,
@@ -817,16 +986,30 @@ def _build_manifest(
         },
         "agents": agent_manifest,
         "review_outcomes": {
-            "validation_blocked": bool(
-                validation_report and validation_report.get("overall_blocked")
+            "validation_blocked": False,
+            "technical_blocked": False,
+            "adversarial_blocked": False,
+            "adversarial_gate_mode": "advisory",
+            "validation_attention_required": validation_attention_required,
+            "technical_attention_required": technical_attention_required,
+            "adversarial_attention_required": adversarial_attention_required,
+            "editorial_attention_required": bool(
+                validation_attention_required
+                or technical_attention_required
+                or adversarial_attention_required
             ),
-            "technical_blocked": bool(
-                technical_review_report
-                and technical_review_report.get("overall_blocked")
+            "validation_findings": len(
+                validation_report.get("findings", []) if validation_report else []
             ),
-            "adversarial_blocked": bool(
-                adversarial_review_report
-                and adversarial_review_report.get("overall_blocked")
+            "technical_findings": len(
+                technical_review_report.get("findings", [])
+                if technical_review_report
+                else []
+            ),
+            "adversarial_unresolved_findings": len(
+                adversarial_review_report.get("findings", [])
+                if adversarial_review_report
+                else []
             ),
             "adversarial_scores": (
                 {
@@ -868,6 +1051,13 @@ def _normalize_definition(payload: dict[str, Any]) -> dict[str, Any]:
         "visual_requirements": deepcopy(payload.get("visual_requirements") or {}),
         "blocking_conditions": _string_list(payload.get("blocking_conditions")),
         "output_targets": _string_list(payload.get("output_targets")) or ["markdown"],
+        "context_section_required": bool(payload.get("context_section_required", True)),
+        "table_of_contents_required": bool(
+            payload.get("table_of_contents_required", True)
+        ),
+        "back_to_top_links_required": bool(
+            payload.get("back_to_top_links_required", True)
+        ),
     }
 
 
@@ -996,10 +1186,17 @@ def _normalize_review_report(
     payload: dict[str, Any], agent_name: str
 ) -> dict[str, Any]:
     findings = [_normalize_finding(item) for item in payload.get("findings", [])]
+    attention_required = bool(
+        payload.get("attention_required") or payload.get("overall_blocked")
+    )
+    if any(finding["severity"] in {"high", "blocking"} for finding in findings):
+        attention_required = True
     return {
         "schema_version": "1",
         "agent": agent_name,
         "overall_blocked": bool(payload.get("overall_blocked")),
+        "attention_required": attention_required,
+        "advisory_only": True,
         "findings": findings,
     }
 
@@ -1009,18 +1206,23 @@ def _normalize_adversarial_review_report(payload: dict[str, Any]) -> dict[str, A
     source_fidelity_score = _clamp_score(payload.get("source_fidelity_score"))
     teachability_score = _clamp_score(payload.get("teachability_score"))
     visual_support_score = _clamp_score(payload.get("visual_support_score"))
-    overall_blocked = bool(payload.get("overall_blocked")) or any(
-        finding["severity"] == "blocking" for finding in findings
+    attention_required = bool(payload.get("attention_required")) or any(
+        finding["severity"] == "high" for finding in findings
     )
     if any(finding["category"] == "source_fidelity" for finding in findings):
-        overall_blocked = True
+        attention_required = True
     return {
         "schema_version": "1",
         "agent": "adversarial-reviewer",
         "source_fidelity_score": source_fidelity_score,
         "teachability_score": teachability_score,
         "visual_support_score": visual_support_score,
-        "overall_blocked": overall_blocked,
+        "overall_blocked": False,
+        "advisory_only": True,
+        "attention_required": attention_required,
+        "counter_narrative_summary": str(
+            payload.get("counter_narrative_summary") or ""
+        ),
         "recommended_reroute": str(
             payload.get("recommended_reroute") or "script-writer"
         ),
@@ -1044,6 +1246,8 @@ def _normalize_finding(value: Any) -> dict[str, Any]:
     severity = str(value.get("severity") or "medium").lower()
     if severity not in {"low", "medium", "high", "blocking"}:
         severity = "medium"
+    if severity == "blocking":
+        severity = "high"
     return _finding(
         severity=severity,
         category=str(value.get("category") or "unknown"),
@@ -1085,6 +1289,9 @@ def _skipped_review_report(agent_name: str, reason: str) -> dict[str, Any]:
                 "source_fidelity_score": 0.0,
                 "teachability_score": 0.0,
                 "visual_support_score": 0.0,
+                "attention_required": False,
+                "advisory_only": True,
+                "counter_narrative_summary": "",
                 "recommended_reroute": "visual-editor",
                 "skills_used": [
                     "source-grounding-attack",
@@ -1134,6 +1341,29 @@ def _collect_failure_messages(*reports: dict[str, Any] | None) -> list[str]:
             if message:
                 messages.append(message)
     return messages
+
+
+def _collect_advisory_messages(
+    adversarial_report: dict[str, Any] | None,
+) -> list[str]:
+    if not adversarial_report:
+        return []
+    messages: list[str] = []
+    for finding in adversarial_report.get("findings", []):
+        message = str(finding.get("message") or "").strip()
+        if message:
+            messages.append(message)
+    return messages
+
+
+def _report_attention_required(report: dict[str, Any] | None) -> bool:
+    if not report:
+        return False
+    if report.get("attention_required"):
+        return True
+    if report.get("overall_blocked"):
+        return True
+    return bool(report.get("findings"))
 
 
 def _clamp_score(value: Any) -> float:

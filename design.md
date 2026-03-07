@@ -237,7 +237,7 @@ Tutorial generation writes under `videos/<artifact_dir>/tutorial/`:
 - `adversarial_review_report.json`
 - `tutorial_revision_plan.json`
 - `tutorial_manifest.json`
-- `tutorial_final.md` when publish-eligible
+- `tutorial_final.md`
 
 ---
 
@@ -375,8 +375,8 @@ Steps:
 7. Run technical review and adversarial review.
 8. Build a revision plan and reroute to the earliest stage that can fix the findings.
 9. Re-run downstream stages up to the configured review-cycle limit.
-10. Write `tutorial_final.md` only when the tutorial clears the gate.
-11. Write `tutorial_manifest.json` with agent/skill digests and review outcomes.
+10. Write `tutorial_final.md` for the latest approved run, even when review warnings remain.
+11. Write `tutorial_manifest.json` with agent/skill digests, review outcomes, and editorial warnings for the latest run.
 
 ## Date-Range Run
 

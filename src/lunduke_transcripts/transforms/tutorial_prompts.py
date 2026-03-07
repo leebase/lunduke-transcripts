@@ -42,10 +42,15 @@ def build_educator_prompt(
             "Audience defaults to a technical user.",
             "Allowed enrichment must be `light`.",
             "First output target must be `markdown`.",
-            "Unsupported factual claims must be blocking.",
+            "The final tutorial must include context before instruction begins.",
             (
-                "Weak visual support must be blocking unless a step is "
-                "explicitly text-only."
+                "The final tutorial must include a table of contents and "
+                "section navigation."
+            ),
+            "Unsupported factual claims must be treated as high-priority issues.",
+            (
+                "Weak visual support must be treated as a high-priority issue "
+                "unless a step is explicitly text-only."
             ),
         ],
         schema={
@@ -64,6 +69,9 @@ def build_educator_prompt(
             },
             "blocking_conditions": ["..."],
             "output_targets": ["markdown"],
+            "context_section_required": True,
+            "table_of_contents_required": True,
+            "back_to_top_links_required": True,
         },
     )
 
@@ -83,9 +91,18 @@ def build_planner_prompt(
         },
         instructions=[
             "Return JSON only.",
-            "Create 2-6 sections with ordered steps.",
+            "Create 2-6 sections with ordered steps for a public-facing tutorial.",
+            (
+                "The first section should explain what the tutorial is for "
+                "and what the reader will get from it."
+            ),
             "Each step must include a stable `step_id`.",
             "Flag assumptions and prerequisites that matter to execution.",
+            (
+                "Do not turn incidental environment details into tutorial "
+                "steps unless they are required for the workflow."
+            ),
+            "Prefer learner order over transcript chronology when the video rambles.",
         ],
         schema={
             "sections": [
@@ -209,11 +226,54 @@ def build_writer_prompt(
         instructions=[
             "Write only Markdown. Do not wrap it in code fences.",
             "Stay grounded in the evidence map.",
-            "Use light enrichment only for orientation and transitions.",
+            "Sound like the speaker in the video if coached by a top-notch educator.",
+            (
+                "Use light enrichment for orientation, framing, and concise "
+                "practical clarity."
+            ),
+            'Start with `<a id="top"></a>` on its own line.',
+            (
+                "Include a `## What This Tutorial Is For` section before the "
+                "tutorial steps."
+            ),
+            (
+                "Explain what the tutorial accomplishes, why it matters, and "
+                "what the reader will have by the end before the step-by-step "
+                "sections begin."
+            ),
+            "Include a `## Table of Contents` section with internal links.",
+            (
+                "Do not make remote-access details, machine names, recording "
+                "setup, or other incidental environment context the first "
+                "actionable step unless the workflow truly depends on them."
+            ),
+            (
+                "If setup context matters but is not core to the lesson, keep "
+                "it brief in the intro or prerequisites instead of turning it "
+                "into a main tutorial step."
+            ),
+            (
+                "Every major section after the table of contents must end "
+                "with `[Back to top](#top)`."
+            ),
+            (
+                "Do not include evidence sections, supporting quotes, "
+                "transcript citations, or reviewer/provenance language in "
+                "the final Markdown."
+            ),
+            "Do not write `Evidence:` anywhere in the tutorial.",
+            (
+                "Do not narrate the video with phrases like `the speaker "
+                "says` unless absolutely necessary."
+            ),
             "Include images with standard Markdown when a frame is selected.",
             (
                 "Use the frame path relative to the tutorial directory, such as "
                 "`../frames/000000.jpg`."
+            ),
+            (
+                "If an image is included, you may add a short italic "
+                "caption, but do not add evidence callouts."
             ),
         ],
     )
@@ -242,16 +302,30 @@ def build_technical_review_prompt(
             "Return JSON only.",
             (
                 "Focus on technical accuracy, completeness, sequence quality, "
-                "and operational usability."
+                "operational usability, and whether this works as a public tutorial."
+            ),
+            (
+                "Treat transcript leakage, missing context, missing table "
+                "of contents, and internal-thinking leakage as "
+                "tutorial-quality defects."
+            ),
+            "Call out incidental setup steps that do not belong in the core tutorial.",
+            (
+                "If the first actionable step is just remote access, machine "
+                "setup, or recording context, call that out as a structural problem."
             ),
             "Do not rewrite the draft. Report findings only.",
             (
                 "Each finding must include `severity`, `category`, "
                 "`message`, and `reroute_target`."
             ),
+            (
+                "Set `attention_required` when the draft needs another pass, "
+                "but do not act like a publish gate."
+            ),
         ],
         schema={
-            "overall_blocked": False,
+            "attention_required": False,
             "findings": [
                 {
                     "severity": "medium",
@@ -290,8 +364,17 @@ def build_adversarial_review_prompt(
                 "Attack unsupported claims, transcript meaning drift, learner "
                 "confusion, and weak screenshot support."
             ),
+            "You are advisory only. You do not decide publishability.",
+            (
+                "Inject a counter-narrative and pressure-test overreach, "
+                "but do not veto release."
+            ),
+            (
+                "Flag voice drift, evidence leakage, generic tutorial "
+                "prose, and internal scaffolding leaking into the public "
+                "artifact."
+            ),
             "Do not rewrite the tutorial.",
-            "Any factual drift must block.",
             (
                 "Each finding must include `severity`, `category`, "
                 "`message`, and `reroute_target`."
@@ -301,11 +384,12 @@ def build_adversarial_review_prompt(
             "source_fidelity_score": 1.0,
             "teachability_score": 1.0,
             "visual_support_score": 1.0,
-            "overall_blocked": False,
+            "attention_required": False,
+            "counter_narrative_summary": "...",
             "recommended_reroute": "script-writer",
             "findings": [
                 {
-                    "severity": "blocking",
+                    "severity": "high",
                     "category": "source_fidelity",
                     "message": "...",
                     "step_id": "step-1",

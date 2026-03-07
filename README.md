@@ -4,7 +4,7 @@ Local-first Python pipeline that ingests YouTube videos or local media files, ca
 
 1. exact transcript artifacts (timestamped + plain text)
 2. canonical JSON artifacts for downstream tutorial generation
-3. multi-agent tutorial artifacts with review gates
+3. multi-agent tutorial artifacts with a co-editor review loop
 4. metadata + run reports
 
 ## Install
@@ -96,7 +96,8 @@ The `tutorial` command is a downstream pipeline that consumes an existing
   - drafts the tutorial
   - validates structure and evidence coverage
   - runs technical review plus adversarial review
-  - writes `tutorial_final.md` only if the tutorial clears the review gate
+  - always writes a fresh `tutorial_final.md` for the latest approved run
+  - records unresolved editorial issues as warnings in `tutorial_manifest.json`
 - Published tutorial Markdown is intended to be reader-facing:
   - context first
   - table of contents plus back-to-top navigation
@@ -105,6 +106,10 @@ The `tutorial` command is a downstream pipeline that consumes an existing
 - The adversarial review is mandatory, but advisory-only:
   - it can trigger rewrite/reroute cycles
   - it does not block publication by itself
+- By default, the ChatGPT Plus router is reserved for the heavier editorial stages:
+  - `tutorial.writer`
+  - `tutorial.technical-review`
+  - adversarial review falls back to the cheaper provider unless you opt in
 
 Optional flags:
 - `--reprocess`
@@ -170,8 +175,10 @@ lunduke-transcripts render \
 
 Typical selective routing:
 - keep `provider/model` on a cheaper API model for extraction and planning
-- route `tutorial.writer`, `tutorial.technical-review`, and
-  `tutorial.adversarial-review` to ChatGPT subscription-backed `gpt-5.4`
+- route `tutorial.writer` and `tutorial.technical-review` to ChatGPT
+  subscription-backed `gpt-5.4`
+- leave adversarial review on the cheaper provider by default for better
+  real-run reliability, unless you explicitly opt it into the stronger path
 
 ## Outputs
 
@@ -201,7 +208,7 @@ data/
       technical_review_report.json
       adversarial_review_report.json
       tutorial_revision_plan.json
-      tutorial_final.md           # when publish-eligible
+      tutorial_final.md
       tutorial_manifest.json
       tutorial_final.html         # when render succeeds
       tutorial_final.pdf          # when render succeeds
@@ -253,7 +260,8 @@ black src tests
   - tune `[app].fetch_retries` and `[app].retry_backoff_seconds`
 - `tutorial_final.pdf` did not refresh after a rerun:
   - check `tutorial_manifest.json`
-  - if `status = "blocked"`, the pipeline intentionally leaves the previous published Markdown/PDF in place until the tutorial clears review
+  - confirm `tutorial_final.md` and `tutorial_final.pdf` timestamps are newer than the last run
+  - unresolved editorial findings no longer suppress fresh final artifacts; they are recorded under `review_outcomes`
 - No transcript files produced: video may not expose captions; check run report status.
 - Local file transcript missing: add a sidecar `.vtt`/`.srt` next to the media file or enable ASR fallback.
 - Frame capture failed:

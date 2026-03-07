@@ -102,7 +102,7 @@ def test_tutorial_pipeline_publishes_and_records_agent_versions(tmp_path) -> Non
     assert (summary.tutorial_dir / "tutorial_final.md").exists()
 
 
-def test_adversarial_block_creates_revision_plan_and_blocks_publish(tmp_path) -> None:
+def test_adversarial_findings_trigger_reroute_and_recover(tmp_path) -> None:
     bundle_path = _make_bundle(tmp_path)
     agents_dir, skills_dir = _make_agent_files(tmp_path)
     llm = FakeTutorialLLM(
@@ -117,10 +117,10 @@ def test_adversarial_block_creates_revision_plan_and_blocks_publish(tmp_path) ->
             ],
             "tutorial.adversarial-review": [
                 _adversarial_review(
-                    overall_blocked=True,
+                    attention_required=True,
                     findings=[
                         {
-                            "severity": "blocking",
+                            "severity": "high",
                             "category": "source_fidelity",
                             "message": (
                                 "Draft claims a step not grounded in transcript."
@@ -131,19 +131,7 @@ def test_adversarial_block_creates_revision_plan_and_blocks_publish(tmp_path) ->
                     ],
                     recommended_reroute="evidence-mapper",
                 ),
-                _adversarial_review(
-                    overall_blocked=True,
-                    findings=[
-                        {
-                            "severity": "blocking",
-                            "category": "source_fidelity",
-                            "message": "Still unsupported after rewrite.",
-                            "step_id": "step-1",
-                            "reroute_target": "evidence-mapper",
-                        }
-                    ],
-                    recommended_reroute="evidence-mapper",
-                ),
+                _adversarial_review(),
             ],
         },
         text_responses={
@@ -163,15 +151,58 @@ def test_adversarial_block_creates_revision_plan_and_blocks_publish(tmp_path) ->
         max_review_cycles=1,
     )
 
-    assert summary.status == "blocked"
-    assert summary.publish_eligible is False
-    revision_plan = json.loads(
-        (summary.tutorial_dir / "tutorial_revision_plan.json").read_text(
-            encoding="utf-8"
-        )
+    assert summary.status == "published"
+    assert summary.publish_eligible is True
+    assert summary.review_cycles == 1
+    assert llm.calls.count("tutorial.evidence") == 2
+
+
+def test_adversarial_findings_do_not_block_after_retry_budget(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [
+                _adversarial_review(
+                    attention_required=True,
+                    findings=[
+                        {
+                            "severity": "high",
+                            "category": "source_fidelity",
+                            "message": "Caution: one step remains thinly supported.",
+                            "step_id": "step-1",
+                            "reroute_target": "script-writer",
+                        }
+                    ],
+                )
+            ],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
     )
-    assert revision_plan["rerun_from_stage"] == "evidence-mapper"
-    assert "Still unsupported after rewrite." in summary.failures[0]
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.status == "published"
+    assert summary.publish_eligible is True
+    assert summary.failures == ["Caution: one step remains thinly supported."]
+    manifest = json.loads(summary.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["review_outcomes"]["adversarial_blocked"] is False
+    assert manifest["review_outcomes"]["adversarial_attention_required"] is True
 
 
 def test_prose_only_issue_reroutes_to_writer_and_recovers(tmp_path) -> None:
@@ -205,7 +236,16 @@ def test_prose_only_issue_reroutes_to_writer_and_recovers(tmp_path) -> None:
         },
         text_responses={
             "tutorial.writer": [
-                "# Demo Tutorial\n\n## Step 1\n\nToo short.\n",
+                '<a id="top"></a>\n\n'
+                "# Demo Tutorial\n\n"
+                "## What This Tutorial Is For\n\n"
+                "Short intro.\n\n"
+                "## Table of Contents\n\n"
+                "- [Step 1](#step-1)\n\n"
+                '<a id="step-1"></a>\n\n'
+                "## Step 1\n\n"
+                "Too short.\n\n"
+                "[Back to top](#top)\n",
                 _draft_markdown(),
             ]
         },
@@ -224,6 +264,7 @@ def test_prose_only_issue_reroutes_to_writer_and_recovers(tmp_path) -> None:
     )
 
     assert summary.status == "published"
+    assert llm.calls.count("tutorial.writer") == 2
     revision_plan = json.loads(
         (summary.tutorial_dir / "tutorial_revision_plan.json").read_text(
             encoding="utf-8"
@@ -286,6 +327,8 @@ def test_text_only_steps_require_justification(tmp_path) -> None:
                     ]
                 }
             ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
         },
         text_responses={"tutorial.writer": [_draft_markdown()]},
     )
@@ -302,7 +345,8 @@ def test_text_only_steps_require_justification(tmp_path) -> None:
         max_review_cycles=0,
     )
 
-    assert summary.status == "blocked"
+    assert summary.status == "published"
+    assert summary.publish_eligible is True
     validation = json.loads(
         (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
             encoding="utf-8"
@@ -310,6 +354,294 @@ def test_text_only_steps_require_justification(tmp_path) -> None:
     )
     assert validation["overall_blocked"] is True
     assert validation["findings"][0]["category"] == "missing_text_only_justification"
+    manifest = json.loads(summary.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["review_outcomes"]["validation_attention_required"] is True
+
+
+def test_final_tutorial_rejects_evidence_leakage_and_missing_navigation(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                "# Demo Tutorial\n\n"
+                "## Step 1\n\n"
+                "> **Evidence:** transcript says to do it.\n\n"
+                "The speaker says to run the command.\n\n"
+                "![Terminal](../frames/000000.jpg)\n"
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.status == "published"
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "missing_context_section" in categories
+    assert "missing_table_of_contents" in categories
+    assert "evidence_leakage" in categories
+
+
+def test_definition_flags_control_public_tutorial_validation(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [
+                _definition(
+                    context_section_required=False,
+                    table_of_contents_required=False,
+                    back_to_top_links_required=False,
+                )
+            ],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                "# Demo Tutorial\n\n"
+                "## Open the terminal\n\n"
+                "Open the terminal and run the command shown in the video.\n\n"
+                "![Terminal window prepared for the command.](../frames/000000.jpg)\n"
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(bundle_path=bundle_path, approve_outline=True)
+
+    assert summary.status == "published"
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "missing_context_section" not in categories
+    assert "missing_table_of_contents" not in categories
+    assert "missing_back_to_top_links" not in categories
+
+
+def test_each_major_section_requires_back_to_top_link(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline_with_two_steps()],
+            "tutorial.evidence": [_evidence_with_two_steps()],
+            "tutorial.visual": [_visual_with_two_steps()],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={
+            "tutorial.writer": [
+                (
+                    '<a id="top"></a>\n\n'
+                    "# Demo Tutorial\n\n"
+                    "## What This Tutorial Is For\n\n"
+                    "This tutorial shows you what the workflow does and what "
+                    "you get from it.\n\n"
+                    "## Table of Contents\n\n"
+                    "- [Open the terminal](#open-the-terminal)\n"
+                    "- [Run the command](#run-the-command)\n\n"
+                    '<a id="open-the-terminal"></a>\n\n'
+                    "## Open the terminal\n\n"
+                    "Open the terminal and get ready.\n\n"
+                    "![Terminal window prepared for the command.]"
+                    "(../frames/000000.jpg)\n\n"
+                    "[Back to top](#top)\n\n"
+                    '<a id="run-the-command"></a>\n\n'
+                    "## Run the command\n\n"
+                    "Run the command from the video.\n\n"
+                    "![Command running in the terminal.](../frames/000001.jpg)\n"
+                )
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.status == "published"
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    messages = [finding["message"] for finding in validation["findings"]]
+    assert any("Run the command" in message for message in messages)
+
+
+def test_validation_findings_do_not_skip_other_reviews(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [_visual()],
+            "tutorial.technical-review": [
+                _technical_review(
+                    findings=[
+                        {
+                            "severity": "medium",
+                            "category": "completeness",
+                            "message": "Explain the command outcome more clearly.",
+                            "step_id": "step-1",
+                            "reroute_target": "script-writer",
+                        }
+                    ]
+                )
+            ],
+            "tutorial.adversarial-review": [
+                _adversarial_review(
+                    attention_required=True,
+                    findings=[
+                        {
+                            "severity": "high",
+                            "category": "source_fidelity",
+                            "message": "One claim needs better grounding.",
+                            "step_id": "step-1",
+                            "reroute_target": "script-writer",
+                        }
+                    ],
+                )
+            ],
+        },
+        text_responses={
+            "tutorial.writer": [
+                "# Demo Tutorial\n\n"
+                "## Step 1\n\n"
+                "> **Evidence:** transcript says to do it.\n\n"
+                "The speaker says to run the command.\n\n"
+                "![Terminal](../frames/000000.jpg)\n"
+            ]
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    assert summary.status == "published"
+    technical = json.loads(
+        (summary.tutorial_dir / "technical_review_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    adversarial = json.loads(
+        (summary.tutorial_dir / "adversarial_review_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert technical.get("skipped") is not True
+    assert adversarial.get("skipped") is not True
+    assert technical["findings"]
+    assert adversarial["findings"]
+
+
+def test_visual_editor_reroute_continues_and_recovers(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [_outline()],
+            "tutorial.evidence": [_evidence()],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": None,
+                            "caption": "",
+                            "alt_text": "",
+                            "support_strength": "weak",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        }
+                    ]
+                },
+                _visual(),
+            ],
+            "tutorial.technical-review": [_technical_review(), _technical_review()],
+            "tutorial.adversarial-review": [
+                _adversarial_review(),
+                _adversarial_review(),
+            ],
+        },
+        text_responses={
+            "tutorial.writer": [_draft_markdown(), _draft_markdown()],
+        },
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=1,
+    )
+
+    assert summary.status == "published"
+    assert llm.calls.count("tutorial.visual") == 2
 
 
 def test_skill_digest_changes_are_recorded_in_manifest(tmp_path) -> None:
@@ -401,6 +733,7 @@ def _make_bundle(tmp_path: Path, *, with_frames: bool = True) -> Path:
         frames_dir = video_dir / "frames"
         frames_dir.mkdir()
         (frames_dir / "000000.jpg").write_text("frame", encoding="utf-8")
+        (frames_dir / "000001.jpg").write_text("frame", encoding="utf-8")
         frame_manifest = {
             "schema_version": "1",
             "frames": [
@@ -409,7 +742,13 @@ def _make_bundle(tmp_path: Path, *, with_frames: bool = True) -> Path:
                     "timestamp_seconds": 1.0,
                     "timestamp": "00:00:01.000",
                     "image_path": "frames/000000.jpg",
-                }
+                },
+                {
+                    "frame_index": 1,
+                    "timestamp_seconds": 3.0,
+                    "timestamp": "00:00:03.000",
+                    "image_path": "frames/000001.jpg",
+                },
             ],
         }
         (video_dir / "frame_manifest.json").write_text(
@@ -444,13 +783,16 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
         ),
         "tutorial-planner.md": (
             "# Agent: tutorial-planner\n\n"
-            "Skills:\n- tutorial-planning\n- grounding\n"
+            "Skills:\n- tutorial-planning\n- tutorial-step-selection\n"
+            "- tutorial-narrative\n- grounding\n"
         ),
         "evidence-mapper.md": (
             "# Agent: evidence-mapper\n\n" "Skills:\n- evidence-mapping\n- grounding\n"
         ),
         "script-writer.md": (
-            "# Agent: script-writer\n\nSkills:\n- tutorial-writing\n- grounding\n"
+            "# Agent: script-writer\n\nSkills:\n- tutorial-writing\n"
+            "- tutorial-narrative\n- public-artifact-hygiene\n"
+            "- tutorial-navigation\n- grounding\n"
         ),
         "visual-editor.md": (
             "# Agent: visual-editor\n\nSkills:\n- frame-selection\n- grounding\n"
@@ -458,7 +800,8 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
         "validator.md": "# Agent: validator\n\nSkills:\n- tutorial-validation\n",
         "technical-reviewer.md": (
             "# Agent: technical-reviewer\n\n"
-            "Skills:\n- technical-review\n- grounding\n"
+            "Skills:\n- technical-review\n- tutorial-quality-review\n"
+            "- public-artifact-hygiene\n- grounding\n"
         ),
         "adversarial-reviewer.md": (
             "# Agent: adversarial-reviewer\n\nSkills:\n"
@@ -472,11 +815,16 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
         "definition-of-done.md": "definition",
         "grounding.md": "grounding",
         "tutorial-planning.md": "planning",
+        "tutorial-step-selection.md": "step selection",
+        "tutorial-narrative.md": "narrative",
         "evidence-mapping.md": "evidence",
         "tutorial-writing.md": "writing",
+        "public-artifact-hygiene.md": "artifact hygiene",
+        "tutorial-navigation.md": "navigation",
         "frame-selection.md": "frames",
         "tutorial-validation.md": "validation",
         "technical-review.md": "tech",
+        "tutorial-quality-review.md": "quality review",
         "source-grounding-attack.md": "ground attack",
         "learner-confusion-attack.md": "learner attack",
         "review-response.md": "review response",
@@ -488,8 +836,8 @@ def _make_agent_files(tmp_path: Path) -> tuple[Path, Path]:
     return agents_dir, skills_dir
 
 
-def _definition() -> dict[str, object]:
-    return {
+def _definition(**overrides) -> dict[str, object]:
+    definition = {
         "target_audience": "technical_user",
         "learning_objectives": ["Open the terminal and run the command."],
         "prerequisites": ["Basic shell access."],
@@ -505,7 +853,12 @@ def _definition() -> dict[str, object]:
         },
         "blocking_conditions": ["unsupported facts"],
         "output_targets": ["markdown"],
+        "context_section_required": True,
+        "table_of_contents_required": True,
+        "back_to_top_links_required": True,
     }
+    definition.update(overrides)
+    return definition
 
 
 def _outline() -> dict[str, object]:
@@ -531,6 +884,34 @@ def _outline() -> dict[str, object]:
     }
 
 
+def _outline_with_two_steps() -> dict[str, object]:
+    return {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Get Started",
+                "goal": "Run the command",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Open the terminal",
+                        "instruction": "Open the terminal and get ready.",
+                        "assumptions": ["A shell is available."],
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-2",
+                        "title": "Run the command",
+                        "instruction": "Run the command from the video.",
+                        "assumptions": ["A shell is available."],
+                        "text_only_allowed": False,
+                    },
+                ],
+            }
+        ]
+    }
+
+
 def _evidence() -> dict[str, object]:
     return {
         "steps": [
@@ -542,6 +923,29 @@ def _evidence() -> dict[str, object]:
                 "assumptions": ["A shell is available."],
                 "notes": "",
             }
+        ]
+    }
+
+
+def _evidence_with_two_steps() -> dict[str, object]:
+    return {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "segment_indexes": [0],
+                "evidence_strength": "strong",
+                "supporting_quote": "Open the terminal.",
+                "assumptions": ["A shell is available."],
+                "notes": "",
+            },
+            {
+                "step_id": "step-2",
+                "segment_indexes": [1],
+                "evidence_strength": "strong",
+                "supporting_quote": "Run the command.",
+                "assumptions": ["A shell is available."],
+                "notes": "",
+            },
         ]
     }
 
@@ -563,35 +967,75 @@ def _visual() -> dict[str, object]:
     }
 
 
+def _visual_with_two_steps() -> dict[str, object]:
+    return {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Terminal open before the command is run.",
+                "alt_text": "Terminal window prepared for the command.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-2",
+                "selected_frame_path": "frames/000001.jpg",
+                "caption": "Command running in the terminal.",
+                "alt_text": "Command running in the terminal.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+        ]
+    }
+
+
 def _draft_markdown() -> str:
     return (
+        '<a id="top"></a>\n\n'
         "# Demo Tutorial\n\n"
+        "## What This Tutorial Is For\n\n"
+        "This tutorial shows you what the workflow does and what you get from it.\n\n"
+        "## Table of Contents\n\n"
+        "- [Open the terminal](#open-the-terminal)\n\n"
+        '<a id="open-the-terminal"></a>\n\n'
         "## Open the terminal\n\n"
         "Open the terminal and run the command shown in the video.\n\n"
-        "![Terminal window prepared for the command.](../frames/000000.jpg)\n"
+        "![Terminal window prepared for the command.](../frames/000000.jpg)\n\n"
+        "*Terminal ready for the command.*\n\n"
+        "[Back to top](#top)\n"
     )
 
 
 def _technical_review(
-    *, overall_blocked: bool = False, findings: list[dict[str, object]] | None = None
+    *,
+    overall_blocked: bool = False,
+    attention_required: bool = False,
+    findings: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "overall_blocked": overall_blocked,
+        "attention_required": attention_required,
         "findings": findings or [],
     }
 
 
 def _adversarial_review(
     *,
-    overall_blocked: bool = False,
+    attention_required: bool = False,
     findings: list[dict[str, object]] | None = None,
     recommended_reroute: str = "script-writer",
 ) -> dict[str, object]:
     return {
-        "source_fidelity_score": 1.0 if not overall_blocked else 0.2,
-        "teachability_score": 1.0 if not overall_blocked else 0.4,
-        "visual_support_score": 1.0 if not overall_blocked else 0.4,
-        "overall_blocked": overall_blocked,
+        "source_fidelity_score": 1.0 if not attention_required else 0.6,
+        "teachability_score": 1.0 if not attention_required else 0.6,
+        "visual_support_score": 1.0 if not attention_required else 0.6,
+        "attention_required": attention_required,
+        "counter_narrative_summary": "",
         "recommended_reroute": recommended_reroute,
         "findings": findings or [],
     }

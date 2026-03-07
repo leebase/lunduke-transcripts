@@ -8,13 +8,14 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Phase** | Tutorial Quality Refinement + Selective GPT-5.4 Routing |
+| **Phase** | Sprint 10 Closeout + Sprint 11 Tutorial Pedagogy Planning |
 | **Mode** | 2 (Implementation with approval) |
 | **Last Updated** | 2026-03-07 |
 
 ### Sprint Status
 | Sprint | Status | Completion |
 |--------|--------|------------|
+| Sprint 10 — Tutorial Quality Refinement | ✅ Completed | 100% |
 | Sprint 9 — Tutorial PDF Rendering | ✅ Completed | 100% |
 | Sprint 8 — Multi-Agent Tutorial Generation | ✅ Completed | 100% |
 | Sprint 7 — Tutorial Asset Extraction Foundation | ✅ Completed with Closeout Remediation | 100% |
@@ -29,9 +30,11 @@
 ## What's Happening Now
 
 ### Current Work Stream
-Sprint 10 is tightening tutorial quality so the public Markdown reads like a
-real tutorial, while selectively routing the expensive tutorial-writing stages
-through `lee-llm-router` and the ChatGPT Plus `gpt-5.4` model.
+Sprint 10 is closed. The tutorial pipeline now uses advisory co-editors instead
+of tutorial-quality hard gates, publishes a fresh latest artifact after outline
+approval, and routes only the heavier editorial stages through ChatGPT Plus by
+default. Sprint 11 is next: make the tutorial itself read like a stronger piece
+of ghostwritten instructional writing.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -76,13 +79,22 @@ through `lee-llm-router` and the ChatGPT Plus `gpt-5.4` model.
 - ✅ Added optional `lee-llm-router` task routing for selected tutorial stages
 - ✅ Added router config/env support plus task-to-role mappings for tutorial stages
 - ✅ Fixed the ChatGPT subscription provider to send required `instructions`, `stream = true`, and SSE parsing without unsupported `temperature`
-- ✅ Fixed the live screencast tutorial rerun so it now completes the full review loop and returns `blocked` cleanly instead of hanging
-- ✅ Verified that `tutorial.writer`, `tutorial.technical-review`, and `tutorial.adversarial-review` run on ChatGPT Plus `gpt-5.4`
+- ✅ Fixed the live screencast tutorial rerun so it now completes the full review loop without tutorial-quality `blocked` status
+- ✅ Verified that `tutorial.writer` and `tutorial.technical-review` run on ChatGPT Plus `gpt-5.4`
 - ✅ Fixed router config/repo/trace paths to resolve relative to the config file, not the current working directory
+- ✅ Removed tutorial-quality hard gates so validation/technical/adversarial stages now act as co-editors
+- ✅ Always run technical and adversarial review, even when validation finds defects
+- ✅ Always write a fresh `tutorial_final.md` after outline approval and record unresolved issues as warnings in `tutorial_manifest.json`
+- ✅ Fixed reroute control flow so `script-writer` and `visual-editor` reroutes continue cleanly
+- ✅ Changed tutorial CLI exit behavior so editorial warnings do not return a failing exit code
+- ✅ Added repo-root fallback for `config/...` router paths when config-relative resolution points at a missing path
+- ✅ Added a wall-clock timeout guard to the ChatGPT subscription streaming provider in `lee-llm-router`
+- ✅ Narrowed the default ChatGPT Plus routing to writer + technical reviewer for better real-run reliability
+- ✅ Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF under the advisory co-editor model
 
 ### In Progress
-- ⏳ Tuning frame selection quality and tutorial voice/ghostwriting behavior
-- ⏳ Improving tutorial evidence selection so the `AgentFlowComplete_compressed.mp4` tutorial can clear review instead of blocking
+- ⏳ Sprint 11 planning: tutorial pedagogy, ghostwriting quality, and step selection
+- ⏳ Evaluating how much stronger the writer/planner prompts should get before adding a source-interpretation stage
 
 ---
 
@@ -102,14 +114,16 @@ through `lee-llm-router` and the ChatGPT Plus `gpt-5.4` model.
 | Frame extraction failures still write the bundle but fail the run | Downstream tools get one canonical manifest without masking a bad extraction | 2026-03-06 |
 | Frame replacements are staged before swap | Reprocessing must not destroy the last known-good frame set | 2026-03-06 |
 | Tutorial prompts live in repo-local agent and skill files | Prompt evolution should be versioned and decoupled from orchestration code | 2026-03-06 |
-| Tutorial publishing requires outline approval plus validation and review gates | The tutorial workflow should mirror the project's code-review discipline | 2026-03-06 |
+| Tutorial generation uses outline approval plus advisory co-editor review | The workflow still mirrors code review, but tutorial stages improve the draft instead of vetoing publication | 2026-03-07 |
 | Markdown remains canonical and PDF render is downstream-only | Content generation and document formatting should stay independent | 2026-03-06 |
 | Tutorial render validates images before running Pandoc/PDF | Screenshot-heavy tutorials must fail fast on broken image references | 2026-03-06 |
 | Chrome-family browser backend is preferred for HTML-to-PDF | Browser rendering handles screenshot-heavy layouts better than a direct PDF path | 2026-03-06 |
 | Adversarial review is advisory-only | It should inject counter-pressure and reroute ideas without outweighing validator/technical review | 2026-03-07 |
 | Public tutorial Markdown must enforce context, TOC, navigation, and no leaked evidence notes | Final output should read like a tutorial, not a transcript with internal scaffolding | 2026-03-07 |
-| Expensive tutorial stages route through `lee-llm-router` and ChatGPT Plus `gpt-5.4` | Writing/review quality benefits from a stronger model while cheap planning/evidence stages stay on cheaper models | 2026-03-07 |
+| ChatGPT Plus routing is reserved by default for writer + technical reviewer | The heavy editorial stages benefit most from `gpt-5.4`; keeping red-team cheaper improves real-run reliability | 2026-03-07 |
 | Router paths resolve relative to the chosen config file | Tutorial routing should not depend on launching the CLI from the repo root | 2026-03-07 |
+| Repo-root fallback is allowed for `config/...` router assets | Real configs commonly point at repo-root config files even when the main TOML file lives under `config/` | 2026-03-07 |
+| Editorial warnings no longer suppress fresh final artifacts | The latest approved tutorial should always be inspectable and renderable, even when reviewers still have objections | 2026-03-07 |
 
 ---
 
@@ -139,7 +153,8 @@ through `lee-llm-router` and the ChatGPT Plus `gpt-5.4` model.
 1. Should semantic frame selection use transcript heuristics first, LLM first, or a hybrid?
 2. Should the visual editor move from metadata-only frame selection to a vision-aware review pass?
 3. Is DOCX or PPTX the next renderer target after PDF?
-4. Should blocked tutorial runs optionally render a `tutorial_draft.pdf` for human review?
+4. Should Sprint 11 add a dedicated source-interpretation stage before planning?
+5. Should adversarial review optionally support a stronger routed model again once the subscription path is more stable?
 
 ---
 
@@ -149,7 +164,7 @@ through `lee-llm-router` and the ChatGPT Plus `gpt-5.4` model.
 |------|--------|-------|----------|
 | 1 | Improve tutorial step selection so incidental setup does not dominate the lesson | Human+AI | Screencast tutorials skip or demote environment setup that is not core to the workflow |
 | 2 | Keep strengthening tutorial voice and ghostwriting quality | Human+AI | Tutorials read like the speaker coached by a top educator, not prettified transcripts |
-| 3 | Decide whether blocked tutorials should render a draft PDF for review | Human+AI | A blocked rerun can still produce a human-reviewable PDF without pretending the tutorial is publishable |
+| 3 | Decide whether to add a source-interpretation stage before planning | Human+AI | Planner/writer get a stronger “what is this video really about?” artifact |
 | 4 | Add the next renderer target after PDF | Human+AI | DOCX or PPTX export works from the published tutorial artifacts |
 
 ---

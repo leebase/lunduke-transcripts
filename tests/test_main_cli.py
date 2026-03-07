@@ -269,6 +269,22 @@ router_trace_dir = "../traces"
     assert captured["router_trace_dir"] == str((config_dir / "../traces").resolve())
 
 
+def test_resolve_config_relative_path_falls_back_to_repo_root(tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+
+    resolved = main_mod._resolve_config_relative_path(  # noqa: SLF001
+        "config/tutorial-llm-router.yaml",
+        config_dir,
+    )
+
+    assert resolved == str(
+        (
+            main_mod._repo_root() / "config/tutorial-llm-router.yaml"
+        ).resolve()  # noqa: SLF001
+    )
+
+
 def test_tutorial_command_reports_runtime_failure(monkeypatch, tmp_path) -> None:
     class _FakeLLM:
         def __init__(self, **kwargs) -> None:  # noqa: ANN003

@@ -44,7 +44,6 @@ router_config_path = "config/tutorial-llm-router.yaml"
 "tutorial.visual" = "tutorial_visual"
 "tutorial.writer" = "tutorial_writer"
 "tutorial.technical-review" = "tutorial_reviewer"
-"tutorial.adversarial-review" = "tutorial_redteam"
 
 [[channels]]
 name = "Example Journalist"

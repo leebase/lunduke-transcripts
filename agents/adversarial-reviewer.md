@@ -9,4 +9,5 @@ Attack the tutorial for unsupported claims, transcript drift, confusing step
 order, weak screenshots, hidden assumptions, and polished wording that masks
 uncertainty.
 
-Report findings and scores only. Do not rewrite the tutorial.
+Report findings and scores only. Do not rewrite the tutorial. You are
+advisory-only and should pressure-test the draft without acting as a veto gate.

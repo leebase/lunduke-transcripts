@@ -44,15 +44,15 @@
 
 **Consequences:** Tutorial manifests record digests for agent and skill files. Prompt changes invalidate the cache and are visible in generated artifacts.
 
-## 2026-03-06 — Tutorial generation uses an approval and review gate before publish
+## 2026-03-06 — Tutorial generation uses an approval and editorial review loop
 
-**Decision:** The tutorial command stops after outline generation until the human reruns with `--approve-outline`, then it requires validation, technical review, adversarial review, and review response before `tutorial_final.md` is publish-eligible.
+**Decision:** The tutorial command stops after outline generation until the human reruns with `--approve-outline`, then it runs validation, technical review, adversarial review, and review response as co-editors before writing the latest `tutorial_final.md`.
 
-**Rationale:** The tutorial flow should mirror how the project writes code: define done, plan, draft, test, review, respond to review. That cooperation model is more reliable than letting one prompt write straight to a publishable tutorial.
+**Rationale:** The tutorial flow should mirror how the project writes code: define done, plan, draft, test, review, respond to review. That cooperation model is more reliable than letting one prompt write straight to a publishable tutorial, but the reviewers are meant to improve the draft rather than veto it.
 
-**Alternatives rejected:** A single-pass writer would be simpler but too prone to smooth factual drift. Fully manual gating at every stage would be slower than needed for v1.
+**Alternatives rejected:** A single-pass writer would be simpler but too prone to smooth factual drift. Hard publish gates for every editorial disagreement made the pipeline overweight objections and left stale public artifacts behind. Fully manual gating at every stage would be slower than needed for v1.
 
-**Consequences:** Tutorial generation produces more intermediate artifacts, but every blocked tutorial has machine-readable diagnostics and a clear reroute target.
+**Consequences:** Tutorial generation produces more intermediate artifacts, and review warnings remain machine-readable with reroute targets, but editorial findings do not suppress later reviewer stages or prevent the latest approved tutorial artifact from being written.
 
 ## 2026-03-06 — PDF rendering is downstream from tutorial generation and image-aware
 
@@ -93,9 +93,9 @@ pipeline overweight objections and pushed it toward overly defensive output.
 Skipping adversarial review entirely would remove an important source of
 pressure-testing before publish.
 
-**Consequences:** Validation and technical review remain the hard publish gates.
-Adversarial findings can trigger reroute cycles and remain visible as warnings in
-the manifest when unresolved.
+**Consequences:** Adversarial findings can trigger reroute cycles and remain
+visible as warnings in the manifest when unresolved, but they do not veto the
+latest tutorial artifact.
 
 ## 2026-03-07 — Public tutorial Markdown enforces navigation and internal-note hygiene
 
@@ -119,9 +119,8 @@ future format legitimately needs a different structure.
 ## 2026-03-07 — Expensive tutorial stages route through `lee-llm-router`
 
 **Decision:** Tutorial planning/evidence stages may stay on cheaper API models,
-but the expensive editorial stages (`tutorial.writer`,
-`tutorial.technical-review`, and `tutorial.adversarial-review`) route through
-`lee-llm-router` so they can use the local ChatGPT Plus `gpt-5.4` access path.
+while the default ChatGPT Plus routing is reserved for the heaviest editorial
+stages (`tutorial.writer` and `tutorial.technical-review`).
 
 **Rationale:** The strongest model quality is most valuable when the pipeline is
 writing or judging public tutorial prose. Using it for the easy extraction or
@@ -135,6 +134,7 @@ already belongs in `lee-llm-router`.
 
 **Consequences:** The lunduke CLI now accepts router config/env settings and
 task-role mappings. Router paths are resolved relative to the selected config
-file so users can launch the CLI from outside the repo root. The subscription
-provider in `lee-llm-router` now sends `instructions`, uses SSE, stops on the
-completion signal, and omits unsupported `temperature`.
+file, with a repo-root fallback for `config/...` assets that exist there. The
+subscription provider in `lee-llm-router` now sends `instructions`, uses SSE,
+stops on the completion signal, omits unsupported `temperature`, and enforces a
+wall-clock timeout guard for streaming responses.
