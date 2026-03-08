@@ -5,7 +5,16 @@ from copy import deepcopy
 from pathlib import Path
 
 from lunduke_transcripts.app.tutorial_agent_registry import TutorialAgentRegistry
-from lunduke_transcripts.app.tutorial_pipeline import TutorialPipeline
+from lunduke_transcripts.app.tutorial_pipeline import (
+    TutorialPipeline,
+    _apply_frame_selection_plan_to_draft,
+    _apply_public_editorial_pass,
+    _normalize_definition,
+    _normalize_frame_selection_plan,
+    _normalize_outline_assumptions,
+    _refit_frame_selection_plan_to_draft,
+    _step_matches_reference,
+)
 
 
 class FakeTutorialLLM:
@@ -1399,6 +1408,147 @@ def test_outline_validation_ignores_intro_context_for_best_first_alignment(
     assert "outline_misaligned_with_interpretation" not in categories
 
 
+def test_outline_validation_ignores_non_text_intro_context_for_best_first_alignment(
+    tmp_path,
+) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.source-interpretation": [
+                {
+                    "core_workflow": "Use AI to plan the transcript project.",
+                    "learner_payoff": "Start with the real workflow.",
+                    "best_first_action": (
+                        "Engage the AI as a co-thinker to define project goals."
+                    ),
+                    "steps_to_emphasize": [
+                        "Engage the AI as a co-thinker to define project goals."
+                    ],
+                    "steps_to_demote": [],
+                    "incidental_context": [],
+                    "terminology_notes": [],
+                }
+            ],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Introduction",
+                            "goal": "Orient the reader",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "What You Will Have by the End",
+                                    "instruction": (
+                                        "Explain what the reader will understand "
+                                        "by the end."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                }
+                            ],
+                        },
+                        {
+                            "section_id": "section-2",
+                            "title": "Getting Started",
+                            "goal": "Start the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-2",
+                                    "title": (
+                                        "Engage AI as a co-thinker to define "
+                                        "project goals"
+                                    ),
+                                    "instruction": (
+                                        "Start a conversation with the AI to "
+                                        "define the project goals."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                }
+                            ],
+                        },
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "By the end...",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "segment_indexes": [1],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Engage the AI.",
+                            "assumptions": [],
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": "frames/000000.jpg",
+                            "caption": "Intro context.",
+                            "alt_text": "Intro context.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                        {
+                            "step_id": "step-2",
+                            "selected_frame_path": "frames/000001.jpg",
+                            "caption": "AI planning conversation.",
+                            "alt_text": "AI planning conversation.",
+                            "support_strength": "strong",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        },
+                    ]
+                }
+            ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    validation = json.loads(
+        (summary.tutorial_dir / "tutorial_validation_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    categories = {finding["category"] for finding in validation["findings"]}
+    assert "outline_misaligned_with_interpretation" not in categories
+
+
 def test_outline_copyedits_known_term_confusions(tmp_path) -> None:
     bundle_path = _make_bundle(tmp_path)
     agents_dir, skills_dir = _make_agent_files(tmp_path)
@@ -1583,6 +1733,543 @@ def test_validation_findings_do_not_skip_other_reviews(tmp_path) -> None:
     assert adversarial.get("skipped") is not True
     assert technical["findings"]
     assert adversarial["findings"]
+
+
+def test_public_editorial_pass_injects_workflow_patterns_and_strips_scaffolding() -> (
+    None
+):
+    draft = (
+        '<a id="top"></a>\n\n'
+        "# Demo Tutorial\n\n"
+        "## What This Tutorial Is For\n\n"
+        "Context.\n\n"
+        "This is a workflow tutorial, not a fully copy-paste setup guide. "
+        "The source demonstrates the process clearly, but it does not provide "
+        "every exact command, runtime flag, or environment configuration needed "
+        "to reproduce the project verbatim in another setup.\n\n"
+        "## Table of Contents\n\n"
+        "- [Introduction and Tutorial Overview](#introduction-and-tutorial-overview)\n"
+        "  - [What This Tutorial Is For](#what-this-tutorial-is-for-1)\n"
+        "- [Define Product Goals with AI](#define-product-goals-with-ai)\n"
+        "- [Text-Only and Visual Notes](#text-only-and-visual-notes)\n\n"
+        "## Introduction and Tutorial Overview\n\n"
+        "### What This Tutorial Is For\n\n"
+        "This section repeats the intro heading.\n\n"
+        "[Back to top](#top)\n\n"
+        "### Define Product Goals with AI\n\n"
+        "Set the goals for the utility.\n\n"
+        "[Back to top](#top)\n\n"
+        "### Text-Only and Visual Notes\n\n"
+        "This should be removed.\n\n"
+        "[Back to top](#top)\n"
+    )
+    outline = {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Planning",
+                "goal": "Define the goals",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Define Product Goals with AI",
+                        "instruction": "Set the goals for the utility.",
+                        "text_only_allowed": False,
+                    }
+                ],
+            }
+        ]
+    }
+    frame_selection_plan = {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": None,
+                "text_only": True,
+            }
+        ]
+    }
+
+    revised = _apply_public_editorial_pass(
+        draft,
+        outline=outline,
+        frame_selection_plan=frame_selection_plan,
+    )
+
+    assert "guided workflow walkthrough" in revised
+    assert (
+        "AI coding tool environment and a Python-capable project workspace" in revised
+    )
+    assert "### The Demonstrated Project" in revised
+    assert "- [The Demonstrated Project](#the-demonstrated-project)" in revised
+    assert "### What This Tutorial Is For" not in revised
+    assert "Try this planning prompt:" not in revised
+    assert "Artifact to keep:" not in revised
+    assert "Text-Only and Visual Notes" not in revised
+
+
+def test_definition_normalization_softens_prereqs_and_contract() -> None:
+    definition = _normalize_definition(
+        {
+            "target_audience": "technical_user",
+            "learning_objectives": [
+                "Understand the process of using codecs as demonstrated in the video",
+                "Follow step-by-step instructions to download transcripts",
+            ],
+            "prerequisites": [
+                "Access to a Mac Mini or similar environment as shown in the video",
+                (
+                    "Understanding of what codecs and transcripts are in the "
+                    "context of video processing"
+                ),
+                "Basic knowledge of AI interaction concepts",
+            ],
+            "success_criteria": [
+                (
+                    "The learner can initiate a new project folder and name it "
+                    "appropriately"
+                ),
+                (
+                    "The learner can follow step-by-step instructions to "
+                    "download and manage YouTube video transcripts as demonstrated"
+                ),
+            ],
+        }
+    )
+
+    assert "codecs" not in json.dumps(definition).lower()
+    assert definition["learning_objectives"][1] == (
+        "Follow demonstrated workflow instructions to download transcripts"
+    )
+    assert definition["prerequisites"] == [
+        "Access to a terminal-based development environment.",
+        (
+            "Basic familiarity with what video transcripts are and with using "
+            "an AI coding assistant."
+        ),
+        "Basic familiarity with using an AI coding assistant.",
+    ]
+    assert definition["success_criteria"][0] == (
+        "The learner understands how the demonstrated workflow moves from a "
+        "prepared workspace into AI-assisted planning."
+    )
+    assert "step-by-step" not in json.dumps(definition).lower()
+
+
+def test_outline_assumptions_are_softened_to_minimal_supported_context() -> None:
+    assumptions = _normalize_outline_assumptions(
+        [
+            "Project folder is pre-created or ready for use.",
+            "You have access to Codex through ChatGPT Plus or equivalent.",
+            "Familiarity with basic software architecture concepts.",
+            "Understanding of sprint planning concepts.",
+            "Access to environment variables or keys for AI services.",
+        ]
+    )
+
+    assert assumptions == [
+        "A project workspace is ready for use.",
+        "You have access to Codex or a comparable AI coding assistant.",
+        "Basic familiarity with technical project planning.",
+        "Willingness to break work into small, trackable tasks.",
+        "Access to any AI configuration the later formatting step requires.",
+    ]
+
+
+def test_weak_conceptual_visual_is_downgraded_to_text_only(tmp_path) -> None:
+    bundle_path = _make_bundle(tmp_path)
+    agents_dir, skills_dir = _make_agent_files(tmp_path)
+    llm = FakeTutorialLLM(
+        json_responses={
+            "tutorial.educator": [_definition()],
+            "tutorial.planner": [
+                {
+                    "sections": [
+                        {
+                            "section_id": "section-1",
+                            "title": "Planning",
+                            "goal": "Plan the project",
+                            "steps": [
+                                {
+                                    "step_id": "step-1",
+                                    "title": "Create a Sprint Plan",
+                                    "instruction": (
+                                        "Break the work into testable steps."
+                                    ),
+                                    "assumptions": [],
+                                    "text_only_allowed": False,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "tutorial.evidence": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "segment_indexes": [0],
+                            "evidence_strength": "strong",
+                            "supporting_quote": "Create a sprint plan.",
+                            "assumptions": [],
+                            "notes": "",
+                        }
+                    ]
+                }
+            ],
+            "tutorial.visual": [
+                {
+                    "steps": [
+                        {
+                            "step_id": "step-1",
+                            "selected_frame_path": "frames/000000.jpg",
+                            "caption": "Generic terminal view.",
+                            "alt_text": "Generic terminal view.",
+                            "support_strength": "weak",
+                            "text_only": False,
+                            "text_only_reason": None,
+                            "notes": "",
+                        }
+                    ]
+                }
+            ],
+            "tutorial.technical-review": [_technical_review()],
+            "tutorial.adversarial-review": [_adversarial_review()],
+        },
+        text_responses={"tutorial.writer": [_draft_markdown()]},
+    )
+    pipeline = TutorialPipeline(
+        llm=llm,
+        agent_registry=TutorialAgentRegistry(
+            agents_dir=agents_dir, skills_dir=skills_dir
+        ),
+    )
+
+    summary = pipeline.run(
+        bundle_path=bundle_path,
+        approve_outline=True,
+        max_review_cycles=0,
+    )
+
+    frame_selection_plan = json.loads(
+        (summary.tutorial_dir / "frame_selection_plan.json").read_text(encoding="utf-8")
+    )
+    step = frame_selection_plan["steps"][0]
+    assert step["selected_frame_path"] is None
+    assert step["text_only"] is True
+    assert step["support_strength"] == "text_only"
+
+
+def test_reused_frame_is_downgraded_for_later_steps() -> None:
+    outline = {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Workflow",
+                "goal": "Walk the project lifecycle",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Create a Sprint Plan",
+                        "instruction": "Break the work into testable steps.",
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-2",
+                        "title": "Review the Code",
+                        "instruction": "Review the generated code in detail.",
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-3",
+                        "title": "Iterate on Fixes",
+                        "instruction": "Address the review findings.",
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-4",
+                        "title": "Run the Application",
+                        "instruction": "Execute the utility and inspect the output.",
+                        "text_only_allowed": False,
+                    },
+                ],
+            }
+        ]
+    }
+    frame_manifest = {
+        "frames": [
+            {"image_path": "frames/000000.jpg"},
+            {"image_path": "frames/000001.jpg"},
+        ]
+    }
+    payload = {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared terminal frame.",
+                "alt_text": "Shared terminal frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-2",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared terminal frame.",
+                "alt_text": "Shared terminal frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-3",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared terminal frame.",
+                "alt_text": "Shared terminal frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-4",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared terminal frame.",
+                "alt_text": "Shared terminal frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+        ]
+    }
+
+    plan = _normalize_frame_selection_plan(payload, outline, frame_manifest)
+
+    assert plan["steps"][0]["selected_frame_path"] == "frames/000000.jpg"
+    assert plan["steps"][1]["selected_frame_path"] is None
+    assert plan["steps"][1]["text_only"] is True
+    assert plan["steps"][1]["support_strength"] == "text_only"
+    assert plan["steps"][2]["selected_frame_path"] is None
+    assert plan["steps"][2]["text_only"] is True
+    assert plan["steps"][3]["selected_frame_path"] == "frames/000000.jpg"
+    assert plan["steps"][3]["support_strength"] == "weak"
+
+
+def test_reused_frame_is_downgraded_even_when_only_two_steps_share_it() -> None:
+    outline = {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Workflow",
+                "goal": "Walk the project lifecycle",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Create a Design Note",
+                        "instruction": "Clarify the architecture choices.",
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-2",
+                        "title": "Download and Prepare YouTube Video Transcripts",
+                        "instruction": "Work from transcript text in the project.",
+                        "text_only_allowed": False,
+                    },
+                ],
+            }
+        ]
+    }
+    frame_manifest = {"frames": [{"image_path": "frames/000000.jpg"}]}
+    payload = {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared frame.",
+                "alt_text": "Shared frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-2",
+                "selected_frame_path": "frames/000000.jpg",
+                "caption": "Shared frame.",
+                "alt_text": "Shared frame.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+        ]
+    }
+
+    plan = _normalize_frame_selection_plan(payload, outline, frame_manifest)
+
+    assert plan["steps"][0]["selected_frame_path"] == "frames/000000.jpg"
+    assert plan["steps"][1]["support_strength"] == "weak"
+
+
+def test_step_matching_treats_co_thinker_variants_as_equivalent() -> None:
+    step = {
+        "title": "Start Your Project Planning by Engaging Codex",
+        "instruction": "Use Codex as a collaborative partner before coding.",
+    }
+
+    assert _step_matches_reference(
+        step,
+        "Engage Codex as a co-thinker to define project goals.",
+    )
+
+
+def test_final_visual_fit_reassigns_reused_frame_by_step_timing() -> None:
+    outline = {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Workflow",
+                "goal": "Walk through the lesson",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Design the Project Architecture with Codex",
+                        "instruction": "Create the design note.",
+                        "text_only_allowed": False,
+                    },
+                    {
+                        "step_id": "step-2",
+                        "title": "Download and Prepare YouTube Video Transcripts",
+                        "instruction": "Gather transcript input files.",
+                        "text_only_allowed": False,
+                    },
+                ],
+            }
+        ]
+    }
+    frame_selection_plan = {
+        "schema_version": "1",
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": "frames/000000.jpg",
+                "markdown_image_path": "../frames/000000.jpg",
+                "caption": "Architecture discussion.",
+                "alt_text": "Architecture discussion.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+            {
+                "step_id": "step-2",
+                "selected_frame_path": "frames/000000.jpg",
+                "markdown_image_path": "../frames/000000.jpg",
+                "caption": "Transcript input preparation.",
+                "alt_text": "Transcript input preparation.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            },
+        ],
+    }
+    evidence_map = {
+        "steps": [
+            {"step_id": "step-1", "segment_indexes": [0]},
+            {"step_id": "step-2", "segment_indexes": [1]},
+        ]
+    }
+    frame_manifest = {
+        "frames": [
+            {"image_path": "frames/000000.jpg", "timestamp_seconds": 10.0},
+            {"image_path": "frames/000001.jpg", "timestamp_seconds": 120.0},
+        ]
+    }
+    transcript = {
+        "segments": [
+            {"segment_index": 0, "start_seconds": 8.0},
+            {"segment_index": 1, "start_seconds": 118.0},
+        ]
+    }
+    draft_markdown = (
+        "### Design the Project Architecture with Codex\n\n"
+        "Design the architecture.\n\n"
+        "![Architecture discussion.](../frames/000000.jpg)\n\n"
+        "*Architecture discussion.*\n\n"
+        "### Download and Prepare YouTube Video Transcripts\n\n"
+        "Prepare transcript files.\n\n"
+        "![Transcript input preparation.](../frames/000000.jpg)\n\n"
+        "*Transcript input preparation.*\n"
+    )
+
+    refit = _refit_frame_selection_plan_to_draft(
+        draft_markdown=draft_markdown,
+        outline=outline,
+        frame_selection_plan=frame_selection_plan,
+        evidence_map=evidence_map,
+        frame_manifest=frame_manifest,
+        transcript=transcript,
+    )
+
+    assert refit["steps"][0]["selected_frame_path"] == "frames/000000.jpg"
+    assert refit["steps"][1]["selected_frame_path"] == "frames/000001.jpg"
+
+
+def test_apply_frame_selection_plan_to_draft_rewrites_section_image_blocks() -> None:
+    outline = {
+        "sections": [
+            {
+                "section_id": "section-1",
+                "title": "Workflow",
+                "goal": "Walk through the lesson",
+                "steps": [
+                    {
+                        "step_id": "step-1",
+                        "title": "Download and Prepare YouTube Video Transcripts",
+                        "instruction": "Gather transcript input files.",
+                        "text_only_allowed": False,
+                    }
+                ],
+            }
+        ]
+    }
+    frame_selection_plan = {
+        "steps": [
+            {
+                "step_id": "step-1",
+                "selected_frame_path": "frames/000001.jpg",
+                "markdown_image_path": "../frames/000001.jpg",
+                "caption": "Transcript input preparation.",
+                "alt_text": "Transcript input preparation.",
+                "support_strength": "strong",
+                "text_only": False,
+                "text_only_reason": None,
+                "notes": "",
+            }
+        ]
+    }
+    draft_markdown = (
+        "### Download and Prepare YouTube Video Transcripts\n\n"
+        "Prepare transcript files.\n\n"
+        "![Old image](../frames/000000.jpg)\n\n"
+        "*Old caption.*\n"
+    )
+
+    revised = _apply_frame_selection_plan_to_draft(
+        draft_markdown,
+        outline=outline,
+        frame_selection_plan=frame_selection_plan,
+    )
+
+    assert "../frames/000001.jpg" in revised
+    assert "Transcript input preparation." in revised
+    assert "../frames/000000.jpg" not in revised
 
 
 def test_failure_messages_are_deduplicated_across_reports(tmp_path) -> None:

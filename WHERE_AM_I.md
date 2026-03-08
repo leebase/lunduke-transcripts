@@ -11,7 +11,7 @@
 | **Project** | lunduke-transcripts |
 | **Profile** | Python Package |
 | **Current Phase** | Phase 6 — Sprint 11 Pedagogy Implementation |
-| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, default publish-to-PDF handoff with an explicit Markdown-only escape hatch, and selective ChatGPT Plus `gpt-5.4` routing are shipped; Test As Lee now completes the full live screencast publish/render path again, but Sprint 11 quality is still open because the tutorial reads too much like a workflow summary instead of a Lee-approvable public tutorial |
+| **Overall Status** | 🟡 Extraction, reviewed Markdown tutorials, downstream PDF rendering, default publish-to-PDF handoff with an explicit Markdown-only escape hatch, and selective ChatGPT Plus `gpt-5.4` routing are shipped; Test As Lee now completes the full live screencast publish/render path again, and post-draft screenshot refitting has materially improved frame relevance within extracted-frame-only mode, but Sprint 11 quality is still open because the tutorial reads too much like a workflow summary instead of a Lee-approvable public tutorial |
 | **Last Updated** | 2026-03-07 |
 
 ---
@@ -41,8 +41,8 @@
 | Ship source-agnostic tutorial asset extraction | ✅ Done | Local file ingest, frame extraction, degraded bundle handling, and bundle artifacts implemented |
 | Ship downstream multi-agent written tutorial generation | ✅ Done | `tutorial` CLI, approval gate, validation, review, revision, and final Markdown output are implemented |
 | Ship downstream tutorial rendering | ✅ Done | `render` CLI, image validation, HTML staging, PDF output, and render manifests are implemented |
-| Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, advisory co-editor semantics, a source-interpretation stage, stronger planner/writer/reviewer prompts, setup-first validation, `Codex` copy edits, deterministic outline realignment, and intro/context validation fixes are in; the remaining gap is converting the live screencast from a cautious workflow summary into a more actionable tutorial |
-| Make real screencast tutorial reruns finish reliably | 🟡 In progress | Published tutorial runs now auto-render fresh HTML/PDF, routed timeout failures now surface clearly, and the default live screencast flow completes again with a 120-second routed-task budget; the remaining issue is content quality, not stale-artifact/runtime ambiguity |
+| Improve public tutorial quality and hygiene | 🟡 In progress | New tutorial skills, navigation checks, advisory co-editor semantics, a source-interpretation stage, stronger planner/writer/reviewer prompts, setup-first validation, `Codex` copy edits, deterministic outline realignment, unsupported-assumption softening, and a post-draft screenshot-refit pass are in; the remaining gap is converting the live screencast from a workflow summary into a more authored walkthrough |
+| Make real screencast tutorial reruns finish reliably | ✅ Done | Published tutorial runs now auto-render fresh HTML/PDF, routed timeout failures surface clearly, stale finals are cleared before reruns, and the default live screencast flow completes again with a 120-second routed-task budget |
 | Route expensive tutorial stages through ChatGPT Plus `gpt-5.4` | ✅ Done | `lee-llm-router` now handles tutorial writing + technical review while cheap stages stay on cheaper OpenRouter models by default |
 
 ---
@@ -69,8 +69,8 @@
 | Risk/Blocker | Impact | Status |
 |-------------|--------|--------|
 | Upstream YouTube format changes | Discovery/fetch instability | 🟡 Managed with timeout/retry controls |
-| Frame extraction thresholds may be noisy | Too many or weak screenshots | 🟡 Next tuning target |
-| Candidate frames are not yet semantically ranked | Renderers may get too many screenshots | 🟡 Deferred to next phase |
+| Frame extraction thresholds may still produce presenter-heavy candidates | Some rewritten tutorial steps still end up with visuals that are only moderately instructional even after post-draft refit | 🟡 Managed within extracted-frame-only mode |
+| Candidate frames are not yet vision-ranked | The current post-draft refit improves relevance, but it still works from timestamps/metadata rather than a true visual understanding pass | 🟡 Deferred to a future phase |
 | Missing captions for some videos | Partial transcript coverage | 🟢 Handled with ASR fallback path |
 | Live screencast tutorial still reads like a workflow summary rather than a Lee-approvable tutorial | The first actionable section is fixed and the runtime is stable again, but the output still lacks minimally actionable examples and still carries too much caveat-heavy voice | 🟡 Active product-quality constraint |
 
@@ -105,6 +105,7 @@
 | Published tutorial runs auto-trigger downstream render refresh by default, with `--skip-render` for Markdown-only publishes | A fresh approved tutorial should refresh HTML/PDF artifacts in the same user flow instead of leaving stale finals on disk, without making the renderer mandatory for every publish workflow | 2026-03-07 |
 | Sprint 11 quality rules should become validator-visible when practical | Prompt-only coaching is not enough to keep setup-first lesson structure and repetitive low-signal warning noise under control | 2026-03-07 |
 | Tutorial planning should consume an explicit source-interpretation artifact | The live screencast needed a separate core-workflow summary before planning, not just stronger planner instructions | 2026-03-07 |
+| Screenshot relevance should be re-evaluated after the draft exists | Transcript-aligned frame choices were too disconnected from rewritten tutorial steps; a post-draft refit gives better matches without generating new visuals | 2026-03-07 |
 
 ---
 
@@ -123,7 +124,7 @@
 Phase 6 tutorial quality and format expansion:
 
 1. improve tutorial voice and ghostwriting quality so the output becomes a public tutorial instead of a caveat-heavy walkthrough
-2. add minimally actionable prompt/artifact examples without inventing unsupported commands
-3. improve screenshot usefulness or justify more text-only steps
-4. keep pushing transcript-processing execution earlier in the lesson
+2. explain transcript inputs and artifact outputs more concretely without inventing unsupported commands or prompt templates
+3. keep pushing transcript-processing execution earlier in the lesson
+4. keep the extracted-frame-only screenshot refit honest through Lee reruns
 5. add the next renderer target after PDF

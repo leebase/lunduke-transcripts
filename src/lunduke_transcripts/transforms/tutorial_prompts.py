@@ -42,6 +42,23 @@ def build_educator_prompt(
             "Audience defaults to a technical user.",
             "Allowed enrichment must be `light`.",
             "First output target must be `markdown`.",
+            (
+                "Prefer prerequisites that are explicitly shown or minimally "
+                "required. Do not list machine-specific environments like a "
+                "Mac Mini, Git fluency, API keys, or architecture concepts as "
+                "global prerequisites unless the source makes them clearly necessary."
+            ),
+            (
+                "Do not describe the final tutorial as a step-by-step or "
+                "copy-paste guide when the source only demonstrates a workflow "
+                "pattern."
+            ),
+            (
+                "If the source demonstrates a workflow without full runnable "
+                "commands, frame learning objectives and success criteria around "
+                "understanding or following the demonstrated workflow, not full "
+                "copy-paste reproduction."
+            ),
             "The final tutorial must include context before instruction begins.",
             (
                 "The final tutorial must include a table of contents and "
@@ -104,6 +121,11 @@ def build_planner_prompt(
                 "into separate outline steps unless the transcript clearly "
                 "supports them as distinct taught material."
             ),
+            (
+                "Use at most one compact orientation step in the opening "
+                "section unless the source clearly teaches prerequisites or "
+                "setup as distinct lesson material."
+            ),
             "Each step must include a stable `step_id`.",
             (
                 "Only create steps that can be grounded in transcript evidence. "
@@ -112,6 +134,12 @@ def build_planner_prompt(
                 "explicitly demonstrates them."
             ),
             "Flag assumptions and prerequisites that matter to execution.",
+            (
+                "Keep assumptions minimal and evidence-based. Avoid assumptions "
+                "like ChatGPT Plus, architecture fluency, sprint-planning "
+                "knowledge, or API-key setup unless the source clearly makes "
+                "them necessary."
+            ),
             (
                 "Do not turn incidental environment details into tutorial "
                 "steps unless they are required for the workflow."
@@ -342,8 +370,14 @@ def build_writer_prompt(
             ),
             (
                 "Explain what the tutorial accomplishes, why it matters, and "
-                "what the reader will have by the end before the step-by-step "
-                "sections begin."
+                "what the reader will understand or be able to inspect by the "
+                "end before the workflow sections begin."
+            ),
+            (
+                "Keep that opening context compact. Do not create a separate "
+                "`What You Will Have by the End` or similar intro subsection "
+                "unless the source clearly teaches it as a distinct part of "
+                "the lesson."
             ),
             (
                 "Make the opening context sound public-facing and learner-oriented, "
@@ -375,9 +409,20 @@ def build_writer_prompt(
                 "capabilities beyond what the transcript evidence actually supports."
             ),
             (
+                "If the source does not support full independent reproduction, "
+                "say so once in the opening scope note and keep the rest of the "
+                "tutorial focused on the workflow pattern rather than repeating "
+                "the same caveat in every section."
+            ),
+            (
                 "Do not invent exact commands, repo layout details, prerequisites, "
                 "or output guarantees. If the source does not show them concretely, "
                 "say that this screencast demonstrates the workflow at a higher level."
+            ),
+            (
+                "Do not present machine-specific context such as a Mac Mini, an "
+                "already-created folder, or a personal workflow label as a core "
+                "prerequisite unless the tutorial would fail without it."
             ),
             (
                 "When the evidence is suggestive rather than definitive, use "
@@ -389,6 +434,25 @@ def build_writer_prompt(
                 "Do not turn a missing operational detail into smooth filler prose. "
                 "Either ground the detail in evidence or acknowledge that the source "
                 "does not provide an exact command or configuration."
+            ),
+            (
+                "When you describe sprint execution, do not imply Codex can run "
+                "the whole build autonomously or flawlessly. Keep the human in "
+                "the loop for inspection, manual testing, and follow-up fixes."
+            ),
+            (
+                "When you describe transcript inputs, make the minimum input "
+                "shape explicit at a high level. If the source does not show a "
+                "full schema, say that the workflow is operating on raw "
+                "transcript text plus whatever metadata the project already has, "
+                "rather than inventing a strict file format."
+            ),
+            (
+                "For each workflow subsection, give the learner one concrete "
+                "outcome to carry forward, such as a product definition, "
+                "design note, sprint plan, review findings, or progress "
+                "tracker entry, but only when that artifact or decision is "
+                "clearly supported by the source."
             ),
             (
                 "Every major section after the table of contents must end "
@@ -469,7 +533,8 @@ def build_technical_review_prompt(
             (
                 "Treat obvious tool-name mistakes, such as `codecs` where "
                 "`Codex` is clearly intended, as copy-edit defects that must "
-                "be corrected in the next pass."
+                "be corrected in the next pass, but only report this if the "
+                "draft itself literally contains `codecs` or another wrong form."
             ),
             "Call out incidental setup steps that do not belong in the core tutorial.",
             (
@@ -550,7 +615,8 @@ def build_adversarial_review_prompt(
             (
                 "Flag obvious tool-name or product-name mistakes when the "
                 "draft preserves a transcript homophone instead of the "
-                "intended term, such as `codecs` for `Codex`."
+                "intended term, such as `codecs` for `Codex`, but only if the "
+                "draft text literally contains that wrong term."
             ),
             "Do not rewrite the tutorial.",
             (

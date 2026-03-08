@@ -14,8 +14,12 @@ This design implements the current requirements in [product-definition.md](produ
 - capture significant frame candidates as image files
 - write a canonical tutorial asset bundle for later renderers
 
-Current phase focus is reliability, traceability, stable extraction artifacts, and
-a multi-agent written-tutorial pipeline built on top of the canonical bundle.
+Current phase focus is reliability, traceability, stable extraction artifacts,
+and a multi-agent written-tutorial pipeline built on top of the canonical
+bundle. The latest Sprint 11 work also treats screenshot selection as a
+two-phase downstream concern: transcript-aligned frame planning happens before
+writing, then the plan is refit after the draft exists so the final screenshots
+better match the rewritten tutorial steps without generating new visuals.
 
 ---
 
@@ -93,13 +97,17 @@ This keeps JSON small, diffable, inspectable, and reusable.
 
 ### 4.3 Hybrid Frame Strategy
 
-Frame selection should be two-stage:
+Frame selection should be three-stage:
 
 1. deterministic extraction of visual candidates using scene-change detection
-2. later optional scoring/selection based on transcript content or LLM reasoning
+2. initial downstream selection based on transcript content, evidence mapping,
+   and writer/editor planning
+3. a post-draft refit pass that can remap reused or weak screenshots to better
+   existing frames once the final tutorial step intent is known
 
-This phase implements stage 1 and also adds a downstream multi-agent tutorial
-pipeline that consumes the canonical bundle.
+This phase implements stage 1 and the current tutorial pipeline now uses stages
+2 and 3 to keep the final screenshot plan better aligned with the public
+tutorial rather than only the source transcript moments.
 
 ---
 
@@ -238,6 +246,11 @@ Tutorial generation writes under `videos/<artifact_dir>/tutorial/`:
 - `tutorial_revision_plan.json`
 - `tutorial_manifest.json`
 - `tutorial_final.md`
+
+The `frame_selection_plan.json` artifact is not necessarily final after the
+first visual-selection pass. During Sprint 11 it became a live downstream plan
+that can be rewritten after the draft exists so the final Markdown/PDF uses the
+best available extracted frames for the actual tutorial steps.
 
 ---
 

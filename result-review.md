@@ -6,6 +6,56 @@
 
 ---
 
+## 2026-03-07 — Sprint 11 Editorial Cleanup and Post-Draft Screenshot Refit
+
+Implemented the next concrete Sprint 11 quality pass by removing unsupported
+public prompt-template inserts, softening unsupported assumptions in the
+tutorial contract, and refitting screenshot choices after the draft exists so
+the final visuals better match the rewritten tutorial steps.
+
+### Built
+
+| Area | What Was Delivered |
+|------|--------------------|
+| Editorial pass | Replaced the old post-writer copy-edit hook with a fuller editorial pass that removes scaffolding sections, strengthens the intro framing, softens repeated source-limit caveats, and strips image blocks from text-only steps |
+| Contract normalization | Softened definition and outline assumptions that were drifting into unsupported claims such as step-by-step copy-paste expectations, hard Mac-only requirements, ChatGPT Plus requirements, or assumed architecture fluency |
+| Action/outline matching | Taught outline validation and reference matching to ignore pure orientation steps when checking the first actionable move, and made the matcher more tolerant of co-thinker paraphrase variants |
+| Screenshot relevance | Added a deterministic post-draft visual-fit pass that re-evaluates `frame_selection_plan.json` against the written tutorial, remaps reused screenshots to more specific later frames when possible, and rewrites the draft image blocks to match the updated plan |
+| Regression coverage | Added tests for definition normalization, outline-assumption softening, earlier weak-frame downgrade, action-title matching variants, post-draft frame refit, draft image-block rewriting, and intro-only step handling |
+| Live validation | Re-ran the real `AgentFlowComplete_compressed.mp4` tutorial flow and confirmed fresh Markdown/PDF finals plus materially better frame-to-step alignment without creating new visuals |
+
+### Why It Matters
+
+- The public draft is less likely to overclaim unsupported setup details or
+  invent reusable prompt templates that the screencast never actually teaches.
+- Screenshot selection is now based on the rewritten tutorial step intent, not
+  only the nearest transcript-aligned frame candidate, which directly addresses
+  the biggest Lee complaint about visual relevance.
+- The remaining Sprint 11 gap is narrower and clearer: writing quality,
+  sequencing, and tutorial voice are now the main blockers instead of runtime
+  reliability or stale visual evidence.
+
+### How to Verify
+
+1. Run targeted checks:
+   - `./.venv/bin/pytest -q tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/ruff check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+   - `./.venv/bin/black --check src/lunduke_transcripts/app/tutorial_pipeline.py src/lunduke_transcripts/transforms/tutorial_prompts.py tests/test_tutorial_pipeline.py`
+2. Re-run the real tutorial flow:
+   - `PYTHONPATH=src ./.venv/bin/python -m lunduke_transcripts.main tutorial --bundle data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial_asset_bundle.json --approve-outline --reprocess --config config/channels.toml --env-file .env`
+3. Inspect the refreshed visual plan and final artifacts:
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/frame_selection_plan.json`
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.md`
+   - `data/videos/undated_agentflowcomplete-compressed__local-07a44a6c708888f9/tutorial/tutorial_final.pdf`
+4. Confirm the current live result:
+   - the publish/render path completes and refreshes fresh finals
+   - screenshot reuse is reduced and later steps get more specific existing
+     frames when possible
+   - the tutorial is still not fully Lee-approved because the prose remains too
+     workflow-summary-like in places
+
+---
+
 ## 2026-03-07 — Sprint 11 Prompt and Validator Pedagogy Pass
 
 Implemented the first concrete Sprint 11 pass by tightening planner/writer/reviewer

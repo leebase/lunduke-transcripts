@@ -46,7 +46,17 @@ scaffolding. Test As Lee has now also pushed the live path harder: routed task
 timeouts are surfaced cleanly instead of hanging or failing with blank router
 errors, the default routed tutorial timeout budget is now 120 seconds, and the
 real screencast flow completes end-to-end again with fresh Markdown/HTML/PDF.
-The remaining blocker is tutorial quality, not runtime completion.
+The latest Sprint 11 slice also removed unsupported public prompt-template
+inserts, softened unsupported prerequisite and assumption drift, and added a
+post-writer visual-fit pass that re-evaluates screenshot choices against the
+actual drafted tutorial, remaps reused transcript-adjacent frames to more
+specific later evidence when possible, and rewrites draft image blocks to
+match the updated frame plan. The original screenshot disconnect is now
+materially improved within the "use extracted frames only" constraint. The
+remaining blocker is tutorial quality, not runtime completion: intro/action
+sequencing still needs tightening, transcript-input handling is still too
+abstract, and the final artifact still reads partly like structured workflow
+notes rather than a Lee-approved public walkthrough.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -118,6 +128,9 @@ The remaining blocker is tutorial quality, not runtime completion.
 - ✅ Added a new `source-interpreter` stage plus `source_interpretation.json` and threaded that artifact into planning, evidence, visual selection, writing, and review
 - ✅ Added live/example router-role mappings for `tutorial.source-interpretation`
 - ✅ Test As Lee confirmed the new interpretation artifact and refreshed live outline are generated for `AgentFlowComplete_compressed.mp4`
+- ✅ Removed unsupported public `Try this...` and artifact-checklist inserts from the editorial pass and softened unsupported prerequisites/assumptions in live tutorial output
+- ✅ Added a post-writer frame-selection refit that remaps reused screenshots against the actual drafted tutorial steps and rewrites the draft image blocks accordingly
+- ✅ Re-ran the live screencast flow after the screenshot-fit pass and confirmed fresh finals plus materially better frame-to-step alignment without creating new visuals
 - ✅ Tightened source interpretation so setup-first `best_first_action` values normalize toward the first substantive emphasized action
 - ✅ Added deterministic outline realignment so the first actionable step follows the interpreted first action when the planner still leaves setup first
 - ✅ Test As Lee confirmed a workspace-codepath live rerun now starts the refreshed outline with `Engage AI as a Co-Thinker...` instead of project-folder creation
@@ -167,6 +180,7 @@ The remaining blocker is tutorial quality, not runtime completion.
 | Sprint 11 pedagogy checks should be machine-visible when possible | Prompt-only coaching is too weak; setup-first lesson structure and noisy duplicate warnings need validator/report support | 2026-03-07 |
 | Planning should consume an explicit source-interpretation artifact | The live screencast needed a separate "what is this really teaching?" summary before planning, not just stronger planner instructions | 2026-03-07 |
 | Routed tutorial tasks need an explicit wall-clock budget larger than the old 60s default | The real `tutorial.evidence` stage can legitimately run past 60 seconds; a 120-second budget plus clear timeout surfacing keeps Lee's path bounded without silent hangs or blank errors | 2026-03-07 |
+| Screenshot selection should get a deterministic post-draft refit pass | Transcript-aligned frame picks were often only adjacent evidence for the rewritten tutorial; refitting after the draft exists improves screenshot relevance without generating new visuals | 2026-03-07 |
 
 ---
 
@@ -193,11 +207,11 @@ The remaining blocker is tutorial quality, not runtime completion.
 
 ## Open Questions (keep short)
 
-1. Should semantic frame selection use transcript heuristics first, LLM first, or a hybrid?
-2. Should the visual editor move from metadata-only frame selection to a vision-aware review pass?
-3. Is DOCX or PPTX the next renderer target after PDF?
-4. Should Sprint 11 add a dedicated source-interpretation stage before planning?
-5. How should Sprint 11 supply minimally actionable prompt/artifact examples when the source is a workflow demo rather than a command-by-command tutorial?
+1. How compact can the opening context become without confusing first-time readers?
+2. How concrete should artifact examples get when the source is a workflow demo rather than a command-by-command tutorial?
+3. Should the revision pass be more constrained than the first writer so it stops reintroducing overreach?
+4. Is DOCX or PPTX the next renderer target after PDF?
+5. Should later screenshot selection become vision-aware, or is the current post-draft refit enough for extracted-frame-only mode?
 
 ---
 
@@ -206,9 +220,9 @@ The remaining blocker is tutorial quality, not runtime completion.
 | Rank | Action | Owner | Done When |
 |------|--------|-------|----------|
 | 1 | Keep strengthening tutorial voice and ghostwriting quality | Human+AI | Tutorials read like the speaker coached by a top educator, not a cautious workflow summary |
-| 2 | Add minimally actionable prompt/artifact examples without overstating what the screencast proves | Human+AI | Core planning, sprinting, review, and run sections teach concrete takeaways instead of caveat-heavy abstraction |
-| 3 | Improve screenshot usefulness or justify more text-only steps | Human+AI | Non-text steps stop failing on weak visual support |
-| 4 | Keep pushing live step selection from AI planning into transcript-processing execution | Human+AI | The tutorial moves from project planning into fetching/processing transcripts earlier in the lesson |
+| 2 | Add minimally actionable artifact shapes without inventing unsupported prompt templates | Human+AI | Planning, design, sprinting, review, and run sections teach concrete takeaways without fabricated commands or prompts |
+| 3 | Keep pushing live step selection from AI planning into transcript-processing execution | Human+AI | The tutorial moves from project planning into fetching/processing transcripts earlier in the lesson |
+| 4 | Keep the post-draft screenshot refit honest inside extracted-frame-only mode | Human+AI | Weak/reused visuals are either remapped, clearly captioned, or downgraded instead of being overstated |
 | 5 | Add the next renderer target after PDF | Human+AI | DOCX or PPTX export works from the published tutorial artifacts |
 
 ---
@@ -240,6 +254,6 @@ The remaining blocker is tutorial quality, not runtime completion.
 ## Done Checklist
 - [x] Mode acknowledged: worked within autonomy boundaries
 - [x] Tests pass clean (run profile-specific tests)
-- [x] Tested As Lee: ran app as a user, recorded the remaining live-run hang and quality gap
+- [x] Tested As Lee: ran app as a user, verified the real publish/render path and the remaining writing-quality gap
 - [x] Updated: context.md, WHERE_AM_I.md, result-review.md, sprint-plan.md
-- [ ] Committed and pushed with descriptive message
+- [x] Committed and pushed with descriptive message

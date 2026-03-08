@@ -139,9 +139,19 @@ Assumptions:
   end-to-end again with fresh `tutorial_final.md`, `tutorial_final.html`,
   `tutorial_final.pdf`, and `render_manifest.json`, and the first actionable
   section now starts with AI planning instead of folder setup.
-- The remaining Sprint 11 gap is content quality, not runtime completion:
-  the live tutorial is still too summary-like, too disclaimer-heavy, and still
-  lacks minimally actionable prompt/artifact examples for key workflow steps.
+- The public editorial pass now removes unsupported `Try this...` and artifact
+  checklist inserts, strips scaffolding sections, strengthens intro framing,
+  softens unsupported prerequisite drift, and downgrades images for text-only
+  steps instead of overstating their support.
+- Screenshot selection now gets a deterministic post-draft refit pass: once
+  the written tutorial exists, the pipeline can remap reused transcript-adjacent
+  frames to more specific later evidence and rewrite the draft image blocks to
+  match the updated frame plan.
+- The latest live Lee reruns now materially improve screenshot relevance within
+  the extracted-frame-only constraint. The remaining Sprint 11 gap is content
+  quality, not runtime completion or stale visual selection: the live tutorial
+  is still too summary-like, transcript-input handling is still too abstract,
+  and some final review/revision passes still reintroduce overreach.
 
 ### Next Execution Slice
 
@@ -149,21 +159,23 @@ Assumptions:
   - done when the live outline no longer creates separate weak steps for
     `what you will have by the end`, `why this matters`, or similar generic
     orientation copy unless the source explicitly teaches them
-- [ ] Add minimally actionable prompt and artifact examples for the core phases
-  - done when planning, sprinting, review, and run sections each include at
-    least one reusable prompt or artifact pattern without inventing unsupported
-    shell commands
-- [ ] Remove public-artifact scaffolding sections from the live draft
+- [ ] Make transcript inputs and artifact handling concrete at a high level
+  - done when the draft explains raw transcript text, metadata, and downstream
+    artifacts clearly without inventing unsupported schemas or commands
+- [ ] Tighten the writer/revision loop against observer-language and overreach
+  - done when later review/revision passes stop reintroducing unsupported
+    prompt templates, excess caveats, or workflow-summary voice
+- [x] Remove public-artifact scaffolding sections from the live draft
   - done when the final Markdown no longer creates sections like
     `Text-Only and Visual Notes` and instead folds necessary caveats into the
     relevant context or step
-- [ ] Improve weak-visual handling
-  - done when non-text-only steps either have materially stronger captions /
-    image explanation or are downgraded to justified text-only
+- [x] Improve weak-visual handling inside extracted-frame-only mode
+  - done when non-text-only steps either get a better existing frame through
+    the post-draft refit pass or are downgraded instead of being overstated
 - [ ] Re-run full Test As Lee acceptance on `AgentFlowComplete_compressed.mp4`
   - done when the default live `tutorial` flow completes end-to-end and the
     remaining warning set is materially smaller and higher-signal than the
-    March 7, 2026 13:52 local run
+    latest March 7, 2026 screenshot-refit rerun
 
 ---
 
