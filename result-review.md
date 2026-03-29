@@ -6,6 +6,40 @@
 
 ---
 
+## 2026-03-29 — Sprint 11 Downstream Vendored Router Migration Follow-Up
+
+Implemented the follow-up to close out remaining `lee-llm-router` migration friction.
+`[llm].router_repo_path` is now optional in the runtime config parser, empty
+path values are normalized to `None`, and the sample router configs no longer
+hard-code a developer-specific absolute path. The repo now includes a vendored
+`src/lee_llm_router/` snapshot from this project for stable local use with
+`router_repo_path` unset.
+
+### Built
+
+- Removed hard-coded `/Users/.../lee-llm-router` defaults from `config/channels.toml` and
+  `config/channels.toml.example` and documented the vendored-snapshot recommendation
+- Updated `src/lunduke_transcripts/config.py` to coalesce optional router paths
+  from env and TOML into either a real path or `None`
+- Added regression coverage for empty-string router paths in
+  `tests/test_config_env.py`
+- Exported and committed a vendored `src/lee_llm_router/` snapshot for this repo
+- Updated `README.md` to call out when `router_repo_path` should remain unset
+
+### Why It Matters
+
+Downstream users can now run with an in-repo router snapshot instead of
+environment-specific absolute path assumptions, reducing setup fragility while
+preserving router migration momentum.
+
+### How to Verify
+
+1. Run focused checks with a temp `openai` stub:
+   - `tmpdir=$(mktemp -d) && echo 'class APITimeoutError(Exception): pass\\nclass OpenAI: ...' > \"$tmpdir/openai.py"`
+   - `PYTHONPATH=\"$tmpdir:src\" python3 -m pytest tests/test_config_env.py tests/test_main_cli.py -q`
+2. Confirm template configs and docs omit host-specific `router_repo_path` and that README documents vendored mode
+3. Confirm `src/lee_llm_router/.lee_llm_router_export.json` exists and reflects the latest export source
+
 ## 2026-03-07 — Sprint 11 Editorial Cleanup and Post-Draft Screenshot Refit
 
 Implemented the next concrete Sprint 11 quality pass by removing unsupported

@@ -132,6 +132,16 @@ def _parse_optional_bool(raw: str | bool | None) -> bool | None:
     return None
 
 
+def _coalesce_optional_path(raw_env: str | None, raw_toml: Any) -> str | None:
+    if raw_env is not None:
+        value = str(raw_env).strip()
+        return value or None
+    if raw_toml is None:
+        return None
+    value = str(raw_toml).strip()
+    return value or None
+
+
 def load_env_file(path: str | Path = ".env") -> None:
     """Load simple KEY=VALUE pairs into environment without overriding existing vars."""
 
@@ -259,32 +269,17 @@ def _build_config(
             os.getenv("LLM_ROUTER_ENABLED"),
             _parse_bool(llm_raw.get("router_enabled"), False),
         ),
-        router_repo_path=(
-            str(
-                os.getenv(
-                    "LLM_ROUTER_REPO_PATH",
-                    llm_raw.get("router_repo_path", ""),
-                )
-            ).strip()
-            or None
+        router_repo_path=_coalesce_optional_path(
+            os.getenv("LLM_ROUTER_REPO_PATH"),
+            llm_raw.get("router_repo_path"),
         ),
-        router_config_path=(
-            str(
-                os.getenv(
-                    "LLM_ROUTER_CONFIG_PATH",
-                    llm_raw.get("router_config_path", ""),
-                )
-            ).strip()
-            or None
+        router_config_path=_coalesce_optional_path(
+            os.getenv("LLM_ROUTER_CONFIG_PATH"),
+            llm_raw.get("router_config_path"),
         ),
-        router_trace_dir=(
-            str(
-                os.getenv(
-                    "LLM_ROUTER_TRACE_DIR",
-                    llm_raw.get("router_trace_dir", ""),
-                )
-            ).strip()
-            or None
+        router_trace_dir=_coalesce_optional_path(
+            os.getenv("LLM_ROUTER_TRACE_DIR"),
+            llm_raw.get("router_trace_dir"),
         ),
         router_roles={
             str(key): str(value)

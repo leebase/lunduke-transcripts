@@ -30,7 +30,6 @@ timeout_seconds = 120
 retries = 2
 retry_backoff_seconds = 2
 router_enabled = true
-router_repo_path = "/Users/leeharrington/projects/lee-llm-router"
 router_config_path = "config/tutorial-llm-router.yaml"
 
 [llm.router_roles]

@@ -10,7 +10,7 @@
 |-----------|-------|
 | **Phase** | Sprint 11 Tutorial Pedagogy Implementation |
 | **Mode** | 2 (Implementation with approval) |
-| **Last Updated** | 2026-03-07 |
+| **Last Updated** | 2026-03-29 |
 
 ### Sprint Status
 | Sprint | Status | Completion |
@@ -56,7 +56,10 @@ materially improved within the "use extracted frames only" constraint. The
 remaining blocker is tutorial quality, not runtime completion: intro/action
 sequencing still needs tightening, transcript-input handling is still too
 abstract, and the final artifact still reads partly like structured workflow
-notes rather than a Lee-approved public walkthrough.
+notes rather than a Lee-approved public walkthrough. In parallel, we have now
+completed the vendored `lee-llm-router` migration path for this repo: router
+path defaults are optional for in-repo snapshot mode so local config and CI can
+run without an absolute host-specific checkout path.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -110,6 +113,7 @@ notes rather than a Lee-approved public walkthrough.
 - ✅ Fixed reroute control flow so `script-writer` and `visual-editor` reroutes continue cleanly
 - ✅ Changed tutorial CLI exit behavior so editorial warnings do not return a failing exit code
 - ✅ Added repo-root fallback for `config/...` router paths when config-relative resolution points at a missing path
+- ✅ Added vendored `src/lee_llm_router/` snapshot support and made `router_repo_path`, `router_config_path`, and `router_trace_dir` optional when empty
 - ✅ Added a wall-clock timeout guard to the ChatGPT subscription streaming provider in `lee-llm-router`
 - ✅ Narrowed the default ChatGPT Plus routing to writer + technical reviewer for better real-run reliability
 - ✅ Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF under the advisory co-editor model
