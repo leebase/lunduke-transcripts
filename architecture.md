@@ -187,29 +187,3 @@ can still stop at `tutorial_final.md` with `--skip-render`. If publish succeeds
 and render fails, the command reports a partial overall result while preserving
 the published tutorial status in the payload. The standalone `render` command
 remains available for rerender-only workflows and layout iteration.
-
-## 2026-03-07 — Screenshot plans are refit after the tutorial draft exists
-
-**Decision:** The tutorial pipeline keeps transcript/evidence-driven frame
-selection upstream, but after the writer returns a draft it deterministically
-re-evaluates `frame_selection_plan.json` against the actual tutorial steps and
-can remap reused or weak screenshots to better existing frames before final
-validation/review.
-
-**Rationale:** The biggest Lee complaint about visuals was not missing frames in
-general; it was that transcript-adjacent screenshots often stopped matching the
-rewritten tutorial once the draft became more structured and pedagogical.
-Selecting once, too early, overfit the source transcript timeline instead of
-the final public tutorial.
-
-**Alternatives rejected:** Leaving screenshot choice entirely to the original
-visual-selection pass preserved a cleaner pipeline boundary, but it kept weak or
-misaligned images attached to later rewritten steps. Generating new visuals was
-explicitly out of scope for Sprint 11 and would have added a different class of
-complexity and trust issues.
-
-**Consequences:** `frame_selection_plan.json` can change after drafting, and the
-pipeline rewrites the draft image blocks to match the updated plan before later
-validation/review. Screenshot relevance improves within the extracted-frame-only
-constraint, but the system still depends on the quality of the available source
-frames and does not yet perform a true vision-aware ranking pass.

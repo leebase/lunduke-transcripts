@@ -14,12 +14,8 @@ This design implements the current requirements in [product-definition.md](produ
 - capture significant frame candidates as image files
 - write a canonical tutorial asset bundle for later renderers
 
-Current phase focus is reliability, traceability, stable extraction artifacts,
-and a multi-agent written-tutorial pipeline built on top of the canonical
-bundle. The latest Sprint 11 work also treats screenshot selection as a
-two-phase downstream concern: transcript-aligned frame planning happens before
-writing, then the plan is refit after the draft exists so the final screenshots
-better match the rewritten tutorial steps without generating new visuals.
+Current phase focus is reliability, traceability, stable extraction artifacts, and
+a multi-agent written-tutorial pipeline built on top of the canonical bundle.
 
 ---
 
@@ -97,17 +93,13 @@ This keeps JSON small, diffable, inspectable, and reusable.
 
 ### 4.3 Hybrid Frame Strategy
 
-Frame selection should be three-stage:
+Frame selection should be two-stage:
 
 1. deterministic extraction of visual candidates using scene-change detection
-2. initial downstream selection based on transcript content, evidence mapping,
-   and writer/editor planning
-3. a post-draft refit pass that can remap reused or weak screenshots to better
-   existing frames once the final tutorial step intent is known
+2. later optional scoring/selection based on transcript content or LLM reasoning
 
-This phase implements stage 1 and the current tutorial pipeline now uses stages
-2 and 3 to keep the final screenshot plan better aligned with the public
-tutorial rather than only the source transcript moments.
+This phase implements stage 1 and also adds a downstream multi-agent tutorial
+pipeline that consumes the canonical bundle.
 
 ---
 
@@ -246,11 +238,6 @@ Tutorial generation writes under `videos/<artifact_dir>/tutorial/`:
 - `tutorial_revision_plan.json`
 - `tutorial_manifest.json`
 - `tutorial_final.md`
-
-The `frame_selection_plan.json` artifact is not necessarily final after the
-first visual-selection pass. During Sprint 11 it became a live downstream plan
-that can be rewritten after the draft exists so the final Markdown/PDF uses the
-best available extracted frames for the actual tutorial steps.
 
 ---
 
@@ -391,62 +378,6 @@ Steps:
 10. Write `tutorial_final.md` for the latest approved run, even when review warnings remain.
 11. Write `tutorial_manifest.json` with agent/skill digests, review outcomes, and editorial warnings for the latest run.
 
-### Tutorial Authoring Contract
-
-The live screencast validation in Sprint 11 clarified that the downstream
-tutorial system is solving two different problems:
-
-1. keep the runtime path reliable enough that Lee can regenerate artifacts
-   end-to-end without stale outputs or silent hangs
-2. turn a live workflow demonstration into a public artifact that is useful
-   without inventing unsupported procedural detail
-
-That leads to these design constraints:
-
-- The tutorial pipeline should treat many screencasts as guided workflow
-  walkthroughs, not guaranteed copy-paste setup guides.
-- The opening context may explain purpose, audience, and payoff, but it should
-  stay compact rather than spawning multiple weakly grounded pseudo-steps.
-- The first actionable step should align with the interpreted core workflow,
-  not incidental setup, even when the planner emits text-only setup ahead of it.
-- Unsupported extension/roadmap guidance should stay out of the outline unless
-  the transcript explicitly teaches it.
-- If a screenshot is only weakly supportive, the system should either improve
-  the surrounding explanation/caption or downgrade the step to justified
-  text-only instead of pretending the image teaches the action.
-
-### Source Interpretation and Pedagogy Guardrails
-
-The planner no longer works from transcript chronology alone. It consumes a
-`source_interpretation.json` artifact that identifies:
-
-- the core workflow
-- the learner payoff
-- the best first real action
-- setup or contextual steps to demote
-
-This artifact exists because prompt-only planner coaching was not strong enough
-in live runs. The real screencast repeatedly tried to foreground project-folder
-setup and generic motivation before the actual workflow. The pipeline now uses
-source interpretation plus deterministic outline normalization to keep the first
-actionable section aligned with the interpreted core action.
-
-### Runtime Budget and Failure Semantics
-
-Live Lee runs also exposed a second design issue: routed tutorial stages can
-take longer than the original 60-second budget, especially `tutorial.evidence`.
-
-Current contract:
-
-- routed tutorial stages use an explicit wall-clock timeout budget
-- wrapped router timeouts must surface as machine-readable
-  `llm_router_timeout[...]` errors
-- `tutorial --reprocess` must clear stale final artifacts before starting
-- a successful publish path must refresh downstream HTML/PDF by default
-
-This keeps the live CLI bounded and debuggable while avoiding the earlier state
-where an interrupted or stalled run could leave an older PDF looking current.
-
 ## Date-Range Run
 
 - YouTube channel and video sources use `published_at` when available.
@@ -516,8 +447,6 @@ Therefore:
 - Review failure after max cycles: write revision artifacts and block publish eligibility.
 - One source failure must not fail the entire run.
 - Run returns non-zero only when a system-level failure prevents meaningful processing.
-- Routed tutorial-stage timeout failures must be explicit and actionable rather
-  than surfacing as empty router errors or silent hangs.
 
 ---
 
@@ -589,15 +518,6 @@ CLI should evolve to include:
 ### Slice 3: Bundle Assembly
 - write `tutorial_asset_bundle.json`
 - persist references in SQLite and run reports
-
-### Slice 4: Tutorial Quality Closeout
-- collapse intro/context pseudo-steps into one compact context block
-- add minimally actionable prompt/artifact examples for planning, sprinting,
-  review, and run phases without inventing unsupported shell commands
-- improve screenshot usefulness or justify more text-only steps when visuals are
-  weak
-- rerun the real screencast flow and accept the slice only if the final
-  tutorial becomes less caveat-heavy and more learner-actionable
 - document the stable JSON contracts for future renderers
 
 ---
