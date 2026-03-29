@@ -8,9 +8,9 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Phase** | Sprint 10 Closeout + Sprint 11 Tutorial Pedagogy Planning |
+| **Phase** | Sprint 11 Tutorial Pedagogy Implementation |
 | **Mode** | 2 (Implementation with approval) |
-| **Last Updated** | 2026-03-07 |
+| **Last Updated** | 2026-03-29 |
 
 ### Sprint Status
 | Sprint | Status | Completion |
@@ -36,8 +36,30 @@ approval, auto-renders fresh HTML/PDF artifacts by default when a run reaches
 `published`, and still supports explicit Markdown-only publishes via
 `--skip-render`. Render failures now report a partial overall CLI result while
 keeping the tutorial's published status explicit in the payload. Sprint 11 is
-focused on making the tutorial itself read like a stronger piece of
-ghostwritten instructional writing while tightening public artifact polish.
+now in implementation: planner/writer/reviewer prompts have been tightened
+around learner payoff and setup demotion, outline normalization now applies the
+narrow `Codex` terminology fix, validator heuristics now flag setup-first
+lesson structure, repeated identical warning text is deduplicated before it
+feeds revision/failure summaries, and a new `source_interpretation.json`
+artifact now exists upstream of planning to distinguish the core workflow from
+scaffolding. Test As Lee has now also pushed the live path harder: routed task
+timeouts are surfaced cleanly instead of hanging or failing with blank router
+errors, the default routed tutorial timeout budget is now 120 seconds, and the
+real screencast flow completes end-to-end again with fresh Markdown/HTML/PDF.
+The latest Sprint 11 slice also removed unsupported public prompt-template
+inserts, softened unsupported prerequisite and assumption drift, and added a
+post-writer visual-fit pass that re-evaluates screenshot choices against the
+actual drafted tutorial, remaps reused transcript-adjacent frames to more
+specific later evidence when possible, and rewrites draft image blocks to
+match the updated frame plan. The original screenshot disconnect is now
+materially improved within the "use extracted frames only" constraint. The
+remaining blocker is tutorial quality, not runtime completion: intro/action
+sequencing still needs tightening, transcript-input handling is still too
+abstract, and the final artifact still reads partly like structured workflow
+notes rather than a Lee-approved public walkthrough. In parallel, we have now
+completed the vendored `lee-llm-router` migration path for this repo: router
+path defaults are optional for in-repo snapshot mode so local config and CI can
+run without an absolute host-specific checkout path.
 
 ### Recently Completed
 - ✅ Created `product-definition.md` and `design.md`
@@ -91,6 +113,7 @@ ghostwritten instructional writing while tightening public artifact polish.
 - ✅ Fixed reroute control flow so `script-writer` and `visual-editor` reroutes continue cleanly
 - ✅ Changed tutorial CLI exit behavior so editorial warnings do not return a failing exit code
 - ✅ Added repo-root fallback for `config/...` router paths when config-relative resolution points at a missing path
+- ✅ Added vendored `src/lee_llm_router/` snapshot support and made `router_repo_path`, `router_config_path`, and `router_trace_dir` optional when empty
 - ✅ Added a wall-clock timeout guard to the ChatGPT subscription streaming provider in `lee-llm-router`
 - ✅ Narrowed the default ChatGPT Plus routing to writer + technical reviewer for better real-run reliability
 - ✅ Test As Lee republished `AgentFlowComplete_compressed.mp4` as fresh Markdown and PDF under the advisory co-editor model
@@ -101,11 +124,32 @@ ghostwritten instructional writing while tightening public artifact polish.
 - ✅ Added `--skip-render` so Markdown-only publishes do not depend on the renderer toolchain
 - ✅ Changed tutorial CLI payload/status semantics so render failures report `status = "partial"` while preserving `tutorial_status = "published"`
 - ✅ Re-ran the real screencast `render` CLI and refreshed `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json`
+- ✅ Tightened Sprint 11 planner/writer/reviewer prompts around learner payoff, public-tutorial voice, and setup-first sequencing defects
+- ✅ Added outline-level `incidental_setup_priority` validation for setup-first lesson plans
+- ✅ Reduced low-signal tutorial warning churn by relaxing title-representation matching and deduplicating repeated failure/advisory messages
+- ✅ Extended the narrow `Codex` terminology copy edit into normalized lesson outlines
+- ✅ Added Sprint 11 regression coverage for incidental setup detection, outline terminology normalization, and warning deduplication
+- ✅ Added a new `source-interpreter` stage plus `source_interpretation.json` and threaded that artifact into planning, evidence, visual selection, writing, and review
+- ✅ Added live/example router-role mappings for `tutorial.source-interpretation`
+- ✅ Test As Lee confirmed the new interpretation artifact and refreshed live outline are generated for `AgentFlowComplete_compressed.mp4`
+- ✅ Removed unsupported public `Try this...` and artifact-checklist inserts from the editorial pass and softened unsupported prerequisites/assumptions in live tutorial output
+- ✅ Added a post-writer frame-selection refit that remaps reused screenshots against the actual drafted tutorial steps and rewrites the draft image blocks accordingly
+- ✅ Re-ran the live screencast flow after the screenshot-fit pass and confirmed fresh finals plus materially better frame-to-step alignment without creating new visuals
+- ✅ Tightened source interpretation so setup-first `best_first_action` values normalize toward the first substantive emphasized action
+- ✅ Added deterministic outline realignment so the first actionable step follows the interpreted first action when the planner still leaves setup first
+- ✅ Test As Lee confirmed a workspace-codepath live rerun now starts the refreshed outline with `Engage AI as a Co-Thinker...` instead of project-folder creation
+- ✅ Added CLI-side stale-artifact cleanup for `tutorial --reprocess` so interrupted reruns cannot leave an old PDF/render manifest masquerading as fresh output
+- ✅ Added routed-task timeout handling in `src/lunduke_transcripts/infra/llm_adapter.py` so wrapped `lee-llm-router` timeouts surface as `llm_router_timeout[...]` instead of blank request failures
+- ✅ Raised the default routed tutorial timeout budget to 120 seconds in `config/channels.toml` and both tutorial router YAMLs so the real `tutorial.evidence` stage can finish
+- ✅ Tightened planner/writer prompt contracts so unsupported payoff/extension sections and top-level scaffolding sections are discouraged explicitly
+- ✅ Hardened outline normalization so the interpreted first real action can move ahead of leading text-only setup within the first actionable section
+- ✅ Test As Lee reran the default live screencast flow end-to-end and refreshed `tutorial_final.md`, `tutorial_final.html`, `tutorial_final.pdf`, and `render_manifest.json` without lingering
+- ✅ Test As Lee confirmed the first actionable section now starts with AI planning instead of folder setup in the live final tutorial
 
 ### In Progress
-- ⏳ Sprint 11 planning: tutorial pedagogy, ghostwriting quality, and step selection
-- ⏳ Evaluating how much stronger the writer/planner prompts should get before adding a source-interpretation stage
-- ⏳ Investigating why some router-backed live `tutorial` CLI runs still linger after artifact refresh, including cached publish paths that should now only need the render handoff
+- ⏳ Finishing Sprint 11 ghostwriting work so the live screencast stops reading like a workflow summary and starts teaching with minimally actionable prompts/artifacts
+- ⏳ Tightening planner/evidence/writer behavior so unsupported intro payoff steps, speculative extension steps, and disclaimer-heavy scaffold sections stop appearing in the live tutorial
+- ⏳ Improving visual support quality so non-text steps are not backed only by weak screenshots
 
 ---
 
@@ -137,6 +181,10 @@ ghostwritten instructional writing while tightening public artifact polish.
 | Editorial warnings no longer suppress fresh final artifacts | The latest approved tutorial should always be inspectable and renderable, even when reviewers still have objections | 2026-03-07 |
 | Public tutorial drafts get deterministic copy-edits for known tool-name confusions before validation | Reader-facing output should not leak obvious ASR homophone mistakes like `codecs` when `Codex` is clearly intended | 2026-03-07 |
 | Published tutorial CLI runs auto-trigger downstream PDF rendering by default, but Markdown-only publishes remain available | A fresh approved tutorial should not leave a stale older PDF pretending to be the latest final artifact, but the renderer must not become mandatory for every publish workflow | 2026-03-07 |
+| Sprint 11 pedagogy checks should be machine-visible when possible | Prompt-only coaching is too weak; setup-first lesson structure and noisy duplicate warnings need validator/report support | 2026-03-07 |
+| Planning should consume an explicit source-interpretation artifact | The live screencast needed a separate "what is this really teaching?" summary before planning, not just stronger planner instructions | 2026-03-07 |
+| Routed tutorial tasks need an explicit wall-clock budget larger than the old 60s default | The real `tutorial.evidence` stage can legitimately run past 60 seconds; a 120-second budget plus clear timeout surfacing keeps Lee's path bounded without silent hangs or blank errors | 2026-03-07 |
+| Screenshot selection should get a deterministic post-draft refit pass | Transcript-aligned frame picks were often only adjacent evidence for the rewritten tutorial; refitting after the draft exists improves screenshot relevance without generating new visuals | 2026-03-07 |
 
 ---
 
@@ -163,11 +211,11 @@ ghostwritten instructional writing while tightening public artifact polish.
 
 ## Open Questions (keep short)
 
-1. Should semantic frame selection use transcript heuristics first, LLM first, or a hybrid?
-2. Should the visual editor move from metadata-only frame selection to a vision-aware review pass?
-3. Is DOCX or PPTX the next renderer target after PDF?
-4. Should Sprint 11 add a dedicated source-interpretation stage before planning?
-5. Why do some router-backed live `tutorial` runs linger in an SSL read after refreshing draft artifacts?
+1. How compact can the opening context become without confusing first-time readers?
+2. How concrete should artifact examples get when the source is a workflow demo rather than a command-by-command tutorial?
+3. Should the revision pass be more constrained than the first writer so it stops reintroducing overreach?
+4. Is DOCX or PPTX the next renderer target after PDF?
+5. Should later screenshot selection become vision-aware, or is the current post-draft refit enough for extracted-frame-only mode?
 
 ---
 
@@ -175,10 +223,10 @@ ghostwritten instructional writing while tightening public artifact polish.
 
 | Rank | Action | Owner | Done When |
 |------|--------|-------|----------|
-| 1 | Improve tutorial step selection so incidental setup does not dominate the lesson | Human+AI | Screencast tutorials skip or demote environment setup that is not core to the workflow |
-| 2 | Keep strengthening tutorial voice and ghostwriting quality | Human+AI | Tutorials read like the speaker coached by a top educator, not prettified transcripts |
-| 3 | Decide whether to add a source-interpretation stage before planning | Human+AI | Planner/writer get a stronger “what is this video really about?” artifact |
-| 4 | Investigate the lingering router-backed live tutorial processes seen during Test As Lee | Human+AI | The real `tutorial` CLI exits cleanly after refreshing artifacts instead of hanging in an SSL read |
+| 1 | Keep strengthening tutorial voice and ghostwriting quality | Human+AI | Tutorials read like the speaker coached by a top educator, not a cautious workflow summary |
+| 2 | Add minimally actionable artifact shapes without inventing unsupported prompt templates | Human+AI | Planning, design, sprinting, review, and run sections teach concrete takeaways without fabricated commands or prompts |
+| 3 | Keep pushing live step selection from AI planning into transcript-processing execution | Human+AI | The tutorial moves from project planning into fetching/processing transcripts earlier in the lesson |
+| 4 | Keep the post-draft screenshot refit honest inside extracted-frame-only mode | Human+AI | Weak/reused visuals are either remapped, clearly captioned, or downgraded instead of being overstated |
 | 5 | Add the next renderer target after PDF | Human+AI | DOCX or PPTX export works from the published tutorial artifacts |
 
 ---
@@ -210,6 +258,6 @@ ghostwritten instructional writing while tightening public artifact polish.
 ## Done Checklist
 - [x] Mode acknowledged: worked within autonomy boundaries
 - [x] Tests pass clean (run profile-specific tests)
-- [x] Tested As Lee: ran app as a user, fixed issues found
+- [x] Tested As Lee: ran app as a user, verified the real publish/render path and the remaining writing-quality gap
 - [x] Updated: context.md, WHERE_AM_I.md, result-review.md, sprint-plan.md
 - [x] Committed and pushed with descriptive message

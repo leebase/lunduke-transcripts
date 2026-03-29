@@ -38,7 +38,8 @@ renderer will prefer Google Chrome if it is installed, then fall back to
    - copy [config/tutorial-llm-router.example.yaml](config/tutorial-llm-router.example.yaml)
      to `config/tutorial-llm-router.yaml`
    - enable `[llm].router_enabled = true`
-    - set `[llm].router_repo_path` to your local `lee-llm-router` checkout
+    - keep `[llm].router_repo_path` unset when using the vendored
+      `src/lee_llm_router/` snapshot in this repo
    - map only the expensive tutorial tasks under `[llm.router_roles]`
    - router paths are resolved relative to the config file, so the CLI does not
      need to be launched from the repo root

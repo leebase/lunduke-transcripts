@@ -35,7 +35,6 @@ frame_image_format = "png"
 provider = "openai"
 model = "gpt-4.1-mini"
 router_enabled = true
-router_repo_path = "/Users/leeharrington/projects/lee-llm-router"
 router_config_path = "config/tutorial-llm-router.yaml"
 
 [llm.router_roles]
@@ -71,7 +70,7 @@ clip_end = "00:00:30"
     assert config.llm.provider == "openrouter"
     assert config.llm.model == "openai/gpt-4.1-mini"
     assert config.llm.router_enabled is True
-    assert config.llm.router_repo_path == "/Users/leeharrington/projects/lee-llm-router"
+    assert config.llm.router_repo_path is None
     assert config.llm.router_config_path == "config/tutorial-llm-router.yaml"
     assert config.llm.router_roles["tutorial.writer"] == "tutorial_writer"
     assert config.app.enable_article is True
@@ -89,3 +88,29 @@ clip_end = "00:00:30"
     assert config.files[0].path == "/tmp/demo.mp4"
     assert config.files[0].clip_start == "00:00:05"
     assert config.files[0].clip_end == "00:00:30"
+
+
+def test_empty_router_paths_load_as_none(tmp_path, monkeypatch) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_PROVIDER=openrouter\n", encoding="utf-8")
+    config_file = tmp_path / "channels.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "openrouter"
+model = "openai/gpt-4.1-mini"
+router_enabled = true
+router_repo_path = ""
+router_config_path = ""
+router_trace_dir = ""
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    load_env_file(env_file)
+    config = load_config(config_file)
+
+    assert config.llm.router_repo_path is None
+    assert config.llm.router_config_path is None
+    assert config.llm.router_trace_dir is None

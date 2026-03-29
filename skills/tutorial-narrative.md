@@ -14,6 +14,10 @@ Build a learner narrative:
 - then the steps
 - then a brief recap or next move when useful
 
+Keep context as context. Do not explode generic orientation like "why this
+matters" or "what you will have by the end" into extra pseudo-steps unless the
+source clearly teaches them as their own part of the lesson.
+
 Prefer the clearest teaching order over the exact order the speaker used in the
 video. Cut repetition, false starts, and side chatter unless they teach
 something essential.

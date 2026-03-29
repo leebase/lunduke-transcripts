@@ -418,6 +418,79 @@ def test_tutorial_command_can_skip_auto_render(monkeypatch, tmp_path, capsys) ->
     assert payload["render_attempted"] is False
 
 
+def test_tutorial_command_reprocess_clears_stale_artifacts_before_run(
+    monkeypatch, tmp_path
+) -> None:
+    class _FakeLLM:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _FakeRegistry:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+    class _CheckingPipeline:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.kwargs = kwargs
+
+        def run(self, **kwargs):  # noqa: ANN003
+            from lunduke_transcripts.domain.models import TutorialSummary
+
+            tutorial_dir = kwargs["bundle_path"].parent / "tutorial"
+            assert not (tutorial_dir / "tutorial_manifest.json").exists()
+            assert not (tutorial_dir / "tutorial_final.md").exists()
+            assert not (tutorial_dir / "tutorial_final.html").exists()
+            assert not (tutorial_dir / "tutorial_final.pdf").exists()
+            assert not (tutorial_dir / "render_manifest.json").exists()
+
+            tutorial_dir.mkdir(exist_ok=True)
+            manifest_path = tutorial_dir / "tutorial_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+            return TutorialSummary(
+                status="awaiting_outline_approval",
+                tutorial_dir=tutorial_dir,
+                manifest_path=manifest_path,
+                human_outline_approved=False,
+                publish_eligible=False,
+            )
+
+    monkeypatch.setattr(main_mod, "LLMAdapter", _FakeLLM)
+    monkeypatch.setattr(main_mod, "TutorialAgentRegistry", _FakeRegistry)
+    monkeypatch.setattr(main_mod, "TutorialPipeline", _CheckingPipeline)
+
+    bundle_path = tmp_path / "tutorial_asset_bundle.json"
+    bundle_path.write_text("{}", encoding="utf-8")
+    tutorial_dir = tmp_path / "tutorial"
+    tutorial_dir.mkdir()
+    for name in (
+        "tutorial_manifest.json",
+        "tutorial_final.md",
+        "tutorial_final.html",
+        "tutorial_final.pdf",
+        "render_manifest.json",
+    ):
+        (tutorial_dir / name).write_text("stale", encoding="utf-8")
+
+    args = Namespace(
+        command="tutorial",
+        bundle=str(bundle_path),
+        config=str(tmp_path / "missing.toml"),
+        env_file=str(tmp_path / "missing.env"),
+        approve_outline=False,
+        reprocess=True,
+        max_review_cycles=1,
+        agents_dir=str(tmp_path / "agents"),
+        skills_dir=str(tmp_path / "skills"),
+        skip_render=False,
+    )
+
+    assert main_mod.tutorial_command(args) == 0
+    assert not (tutorial_dir / "tutorial_final.md").exists()
+    assert not (tutorial_dir / "tutorial_final.html").exists()
+    assert not (tutorial_dir / "tutorial_final.pdf").exists()
+    assert not (tutorial_dir / "render_manifest.json").exists()
+
+
 def test_tutorial_command_resolves_router_paths_relative_to_config(
     monkeypatch, tmp_path
 ) -> None:

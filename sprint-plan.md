@@ -76,17 +76,18 @@ Assumptions:
 
 ## Sprint 11 — Tutorial Pedagogy and Ghostwriting Quality
 
-**Status**: ⏳ Planned  
+**Status**: ⏳ In Progress  
 **Goal**: Improve the published tutorial itself so it teaches the underlying workflow cleanly, sounds like the speaker coached by a top-notch educator, and demotes incidental environment/setup details.
 
 ### Scope
 
 - [ ] Improve planner step selection so remote-access and recording context do not become core steps unless required
-- [ ] Strengthen writer prompts and skills around context, payoff, and learner-oriented sequencing
-- [ ] Tighten technical/adversarial review prompts around “is this actually a good public tutorial?”
-- [ ] Reduce repeated “step title not represented” and similar low-signal findings in the final warning set
+- [x] Add a source-interpretation stage so planning gets an explicit core-workflow vs scaffolding artifact
+- [x] Strengthen writer prompts and skills around context, payoff, and learner-oriented sequencing
+- [x] Tighten technical/adversarial review prompts around “is this actually a good public tutorial?”
+- [x] Reduce repeated “step title not represented” and similar low-signal findings in the final warning set
 - [x] Add a terminology spellcheck/copy-edit guard for obvious product-name mistakes such as `Codex`/`codecs`
-- [ ] Re-run `AgentFlowComplete_compressed.mp4` and compare quality against the current refreshed Markdown/PDF
+- [x] Re-run `AgentFlowComplete_compressed.mp4` and compare quality against the current refreshed Markdown/PDF
 
 ### Acceptance Criteria
 
@@ -96,6 +97,28 @@ Assumptions:
 
 ### Delivery Notes
 
+- Planner guidance now explicitly prefers the first irreversible workflow action
+  over setup scaffolding like remote access, recording context, and project-folder
+  choreography.
+- The pipeline now writes `source_interpretation.json` before planning and feeds
+  it into planning, evidence mapping, visual selection, writing, and review so
+  every downstream stage can see the intended core workflow and demoted setup.
+- Source interpretation now normalizes setup-first `best_first_action` values
+  toward the first substantive emphasized action, and outline normalization
+  deterministically reorders the first actionable step when the planner still
+  leaves a demoted setup step first.
+- Technical and adversarial review prompts now explicitly attack weak payoff,
+  setup-first sequencing, and project-note voice rather than only structural
+  hygiene.
+- Validation now reports `incidental_setup_priority` when the outline leads with
+  setup while later steps contain the real workflow, and repeated identical
+  warning messages are deduplicated before they flow back into revision/failure
+  summaries.
+- Outline normalization now applies the narrow `Codex` terminology copy edit as
+  well, so planner artifacts stop feeding obvious homophone mistakes into later
+  stages.
+- Router config now maps `tutorial.source-interpretation` to a dedicated
+  `tutorial_interpreter` role in both live and example configs.
 - Public tutorial drafts now get a narrow deterministic copy-edit pass for
   obvious tool-name confusions before validation runs.
 - Regression coverage now checks that a draft containing `GPT 5.3 codecs` or
@@ -103,9 +126,56 @@ Assumptions:
 - Published tutorial runs now auto-trigger the downstream render step by
   default so a fresh `tutorial_final.md` no longer leaves a stale older PDF on
   disk, while `--skip-render` preserves the explicit Markdown-only workflow.
-- A fresh live screencast draft confirmed the `Codex` spelling fix, but some
-  router-backed `tutorial` CLI runs still linger after draft refresh and need a
-  separate reliability pass.
+- Test As Lee now surfaces wrapped routed-task timeouts as
+  `llm_router_timeout[...]` instead of blank router failures, and the default
+  routed tutorial timeout budget in `config/channels.toml` plus the live/example
+  router YAMLs is now 120 seconds so the real `tutorial.evidence` stage can
+  finish without false failures.
+- Outline normalization and validation now treat the first actionable step as
+  the thing that must align with `best_first_action`, and can move the
+  interpreted first action ahead of a leading text-only setup step within the
+  first actionable section.
+- The latest full default `AgentFlowComplete_compressed.mp4` rerun completes
+  end-to-end again with fresh `tutorial_final.md`, `tutorial_final.html`,
+  `tutorial_final.pdf`, and `render_manifest.json`, and the first actionable
+  section now starts with AI planning instead of folder setup.
+- The public editorial pass now removes unsupported `Try this...` and artifact
+  checklist inserts, strips scaffolding sections, strengthens intro framing,
+  softens unsupported prerequisite drift, and downgrades images for text-only
+  steps instead of overstating their support.
+- Screenshot selection now gets a deterministic post-draft refit pass: once
+  the written tutorial exists, the pipeline can remap reused transcript-adjacent
+  frames to more specific later evidence and rewrite the draft image blocks to
+  match the updated frame plan.
+- The latest live Lee reruns now materially improve screenshot relevance within
+  the extracted-frame-only constraint. The remaining Sprint 11 gap is content
+  quality, not runtime completion or stale visual selection: the live tutorial
+  is still too summary-like, transcript-input handling is still too abstract,
+  and some final review/revision passes still reintroduce overreach.
+
+### Next Execution Slice
+
+- [ ] Collapse intro/context pseudo-steps into one compact opening block
+  - done when the live outline no longer creates separate weak steps for
+    `what you will have by the end`, `why this matters`, or similar generic
+    orientation copy unless the source explicitly teaches them
+- [ ] Make transcript inputs and artifact handling concrete at a high level
+  - done when the draft explains raw transcript text, metadata, and downstream
+    artifacts clearly without inventing unsupported schemas or commands
+- [ ] Tighten the writer/revision loop against observer-language and overreach
+  - done when later review/revision passes stop reintroducing unsupported
+    prompt templates, excess caveats, or workflow-summary voice
+- [x] Remove public-artifact scaffolding sections from the live draft
+  - done when the final Markdown no longer creates sections like
+    `Text-Only and Visual Notes` and instead folds necessary caveats into the
+    relevant context or step
+- [x] Improve weak-visual handling inside extracted-frame-only mode
+  - done when non-text-only steps either get a better existing frame through
+    the post-draft refit pass or are downgraded instead of being overstated
+- [ ] Re-run full Test As Lee acceptance on `AgentFlowComplete_compressed.mp4`
+  - done when the default live `tutorial` flow completes end-to-end and the
+    remaining warning set is materially smaller and higher-signal than the
+    latest March 7, 2026 screenshot-refit rerun
 
 ---
 
